@@ -1,0 +1,9 @@
+# Optional downloader for ModelScope (魔搭) checkpoints.
+# Install it in the same Python environment as the inference service:
+#
+#   pip install -r server/requirements-modelscope.txt
+#
+# If it is absent, `--source huggingface` and the automatic Hugging Face
+# fallback still work because huggingface_hub is installed by
+# requirements-server.txt.
+modelscope>=1.20,<2.0

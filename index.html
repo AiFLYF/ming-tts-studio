@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#080a0b">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Ming TTS Studio — 为 Ming-3.0-tts-tiny 打造的声音工作台，支持语音克隆、多语言、情感、方言、播客与声音设计。">
+  <meta name="keywords" content="Ming-3.0-tts, Ming-3.0-tts-tiny, 语音合成, TTS, 语音克隆, 声音克隆, 零样本克隆, 声音设计, 播客生成, 多人对话, 方言合成, 川渝话, 粤语, 情感语音, TTS WebUI, 自部署语音合成, inclusionAI, 蚂蚁百灵">
+  <meta name="author" content="Ming TTS Studio contributors">
+  <meta name="robots" content="index, follow">
+  <!-- 以下绝对 URL 必须与仓库真实部署地址一致（当前按 aiflyf/ming-tts-studio 填写）。
+       换用户名、改仓库名或绑自定义域名时，这几处要一起改，否则抓不到预览图。 -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Ming TTS Studio">
+  <meta property="og:locale" content="zh_CN">
+  <meta property="og:url" content="https://aiflyf.github.io/ming-tts-studio/">
+  <meta property="og:title" content="Ming TTS Studio · 声音工作台">
+  <meta property="og:description" content="10 项语音合成任务、参考音频上传与试听、实时波形播放器。支持在线 API 与内置演示模式。">
+  <meta property="og:image" content="https://aiflyf.github.io/ming-tts-studio/screenshots/desktop.png">
+  <meta property="og:image:width" content="1600">
+  <meta property="og:image:height" content="1100">
+  <meta property="og:image:alt" content="Ming TTS Studio 桌面端界面：左侧任务导航，中间参数表单，右侧波形播放器。">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Ming TTS Studio · 声音工作台">
+  <meta name="twitter:description" content="10 项语音合成任务、参考音频上传与试听、实时波形播放器。支持在线 API 与内置演示模式。">
+  <meta name="twitter:image" content="https://aiflyf.github.io/ming-tts-studio/screenshots/desktop.png">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Ming TTS Studio",
+    "alternateName": "Ming TTS 声音工作台",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "Web browser (Chrome, Edge, Firefox, Safari)",
+    "description": "为 Ming-3.0-tts 打造的开源 Web 声音工作台：语音克隆、多语言、副语言标签、多人播客、情感、方言、自由描述、声音设计与内置声音共 10 项任务。",
+    "url": "https://aiflyf.github.io/ming-tts-studio/",
+    "screenshot": "https://aiflyf.github.io/ming-tts-studio/screenshots/desktop.png",
+    "isAccessibleForFree": true,
+    "license": "https://opensource.org/licenses/MIT",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
+    "featureList": [
+      "零样本语音克隆",
+      "文本描述的声音设计",
+      "多人播客对话合成",
+      "七种情感与语速音调音量控制",
+      "川渝话与粤语方言合成",
+      "内置 117 个官方音色（484 个可选声音）"
+    ],
+    "sameAs": ["https://github.com/inclusionAI/Ming-3.0-tts"]
+  }
+  </script>
+  <title>Ming TTS Studio · 声音工作台</title>
+  <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/img/apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="assets/css/app.css?v=1.0.5">
+</head>
+<body>
+  <div class="ambient" aria-hidden="true">
+    <span class="ambient-glow glow-a"></span>
+    <span class="ambient-glow glow-b"></span>
+    <span class="ambient-grid"></span>
+  </div>
+
+  <header class="site-header">
+    <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="打开任务导航" aria-expanded="false" aria-controls="sidebar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+        <path d="M4 7h16M4 12h16M4 17h16"/>
+      </svg>
+    </button>
+
+    <a class="brand" href="#seed" aria-label="Ming TTS Studio">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round">
+          <path d="M3.5 13v-2M7.5 16.5v-9M11.5 19.5v-15M15.5 16.5v-9M19.5 13v-2"/>
+        </svg>
+      </span>
+      <span class="brand-type">
+        <strong>Ming TTS</strong>
+        <small>Studio</small>
+      </span>
+    </a>
+
+    <span class="model-chip">Ming-3.0-tts-tiny</span>
+
+    <div class="header-spacer"></div>
+
+    <button class="status-pill is-checking" id="statusPill" type="button" aria-live="polite" title="查看 API 连接设置">
+      <span class="status-dot"></span>
+      <span class="status-label">正在检测</span>
+      <span class="status-meta"></span>
+    </button>
+
+    <a class="header-link" id="docsLink" href="#" target="_blank" rel="noreferrer" aria-disabled="true">API 文档</a>
+
+    <a class="icon-btn" id="githubLink" href="https://github.com/AiFLYF/ming-tts-studio" target="_blank" rel="noreferrer" aria-label="在 GitHub 上查看 AiFLYF/ming-tts-studio" title="GitHub · AiFLYF/ming-tts-studio">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.95 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.85-2.34 4.7-4.57 4.94.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+    </a>
+
+    <button class="ghost-btn" id="libraryBtn" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 7h9v13H4zM13 4h7v16h-7M7 11h3M7 15h3"/>
+      </svg>
+      <span>音频库</span>
+      <span class="count-badge" id="libraryCount">0</span>
+    </button>
+
+    <button class="icon-btn" id="settingsBtn" type="button" aria-label="API 设置" title="API 设置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.2.6.77 1 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/>
+      </svg>
+    </button>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar" aria-label="任务导航">
+      <div class="sidebar-head">
+        <span class="eyebrow">Voice workbench</span>
+        <h2>声音工作台</h2>
+        <p>从一段参考音频，到完全由文字创造的声音。</p>
+      </div>
+
+      <nav class="task-nav" id="taskNav"></nav>
+
+      <div class="sidebar-foot">
+        <div class="endpoint-card">
+          <div class="endpoint-top">
+            <span class="eyebrow">API endpoint</span>
+            <span class="endpoint-light" id="endpointLight"></span>
+          </div>
+          <code id="apiBaseLabel">正在读取…</code>
+          <button class="text-btn" id="sidebarSettingsBtn" type="button">
+            连接设置
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="sidebar-meta">
+          <span>44.1 kHz</span>
+          <span>Mono</span>
+          <span>WAV</span>
+        </div>
+      </div>
+    </aside>
+
+    <div class="sidebar-scrim" id="sidebarScrim" aria-hidden="true"></div>
+
+    <main class="main">
+      <div class="demo-banner" id="demoBanner" hidden>
+        <div class="demo-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>
+            <circle cx="12" cy="12" r="3.2"/>
+          </svg>
+        </div>
+        <div class="demo-copy">
+          <strong>演示模式</strong>
+          <span>未连接到 API，当前使用内置示例音频。连接服务后即可上传参考音频并真实合成。</span>
+        </div>
+        <button class="btn small ghost" id="demoRetryBtn" type="button">重新检测</button>
+        <button class="btn small lime" id="demoSettingsBtn" type="button">连接 API</button>
+      </div>
+
+      <section class="task-hero" id="taskHero" aria-labelledby="taskTitle"></section>
+
+      <div class="workspace">
+        <section class="panel composer-panel" id="composerPanel" aria-label="合成参数"></section>
+
+        <aside class="panel result-panel" aria-label="合成结果">
+          <header class="panel-heading result-heading">
+            <div>
+              <span class="eyebrow">Output</span>
+              <h2>合成结果</h2>
+            </div>
+            <span class="state-chip" id="outputState">待生成</span>
+          </header>
+          <div class="result-body" id="outputBody"></div>
+        </aside>
+      </div>
+
+      <footer class="site-footer">
+        <span>Ming TTS Studio</span>
+        <span class="footer-sep"></span>
+        <span>非官方 Web 界面 · Built for <code>Ming-3.0-tts-tiny</code></span>
+        <span class="footer-spacer"></span>
+        <a class="footer-link" href="https://github.com/AiFLYF/ming-tts-studio" target="_blank" rel="noreferrer">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.95 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.85-2.34 4.7-4.57 4.94.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+          <span>AiFLYF</span>
+        </a>
+        <span class="footer-sep"></span>
+        <span id="footerVersion">v1.0.5</span>
+      </footer>
+    </main>
+  </div>
+
+  <div class="modal" id="libraryModal" aria-hidden="true">
+    <div class="modal-scrim" data-close="library"></div>
+    <section class="dialog library-dialog" role="dialog" aria-modal="true" aria-labelledby="libraryTitle">
+      <header class="dialog-head">
+        <div>
+          <span class="eyebrow">Audio library</span>
+          <h2 id="libraryTitle">音频库</h2>
+          <p>参考音频保存在服务端，可随时试听、复用或删除。</p>
+        </div>
+        <button class="icon-btn dialog-close" id="closeLibraryBtn" type="button" data-close="library" aria-label="关闭音频库">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+
+      <div class="library-toolbar">
+        <label class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input type="search" id="librarySearch" placeholder="搜索已上传的音频…" autocomplete="off">
+        </label>
+        <button class="btn small ghost" id="refreshLibraryBtn" type="button">刷新</button>
+        <span class="library-count" id="libraryCountLabel">0 个文件</span>
+      </div>
+
+      <div class="library-drop" id="libraryDrop" tabindex="0" role="button" aria-label="上传音频到音频库">
+        <input type="file" id="libraryFileInput" accept=".wav,.mp3,.flac" hidden>
+        <span class="drop-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+        </span>
+        <span class="drop-copy">
+          <strong>拖拽音频到这里，或点击选择</strong>
+          <small>WAV / MP3 / FLAC · 最大 50 MB</small>
+        </span>
+        <button class="btn small ghost" id="libraryPickBtn" type="button">选择文件</button>
+      </div>
+
+      <div class="library-list" id="libraryList"></div>
+    </section>
+  </div>
+
+  <div class="modal" id="settingsModal" aria-hidden="true">
+    <div class="modal-scrim" data-close="settings"></div>
+    <section class="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <header class="dialog-head">
+        <div>
+          <span class="eyebrow">Connection</span>
+          <h2 id="settingsTitle">API 连接</h2>
+          <p>指向任意一个 Ming-3.0-tts 网关实例，设置仅保存在当前浏览器。</p>
+        </div>
+        <button class="icon-btn dialog-close" id="closeSettingsBtn" type="button" data-close="settings" aria-label="关闭设置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+
+      <form class="settings-form" id="settingsForm" novalidate>
+        <label class="field-label" for="apiBaseInput">API 地址</label>
+        <div class="api-input-row">
+          <input class="input mono" id="apiBaseInput" type="text" inputmode="url" spellcheck="false" placeholder="http://127.0.0.1:8081">
+          <button class="btn ghost" id="testConnectionBtn" type="button">测试连接</button>
+        </div>
+        <p class="field-help" id="defaultBaseHint"></p>
+
+        <div class="connection-result" id="connectionResult" hidden></div>
+
+        <div class="settings-note">
+          <strong>关于演示模式</strong>
+          <p>页面无法连接 API 时会自动切换为演示模式，使用仓库内置的示例音频。填写可用地址并保存后即可恢复完整功能。</p>
+        </div>
+
+        <div class="settings-actions">
+          <button class="text-btn" id="resetApiBtn" type="button">恢复默认地址</button>
+          <div class="actions-right">
+            <button class="btn ghost" id="cancelSettingsBtn" type="button" data-close="settings">取消</button>
+            <button class="btn lime" id="saveSettingsBtn" type="submit">保存并连接</button>
+          </div>
+        </div>
+      </form>
+
+      <div class="shortcut-list">
+        <span class="eyebrow">Shortcuts</span>
+        <span><kbd>Ctrl</kbd><span>/</span><kbd>⌘</kbd><span>+</span><kbd>Enter</kbd> 生成语音</span>
+        <span><kbd>Esc</kbd> 关闭弹窗</span>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
+
+  <noscript>
+    <div class="noscript">
+      <div class="noscript-inner">
+        <h1>Ming TTS Studio</h1>
+        <p>Ming-3.0-tts 的开源 Web 声音工作台，覆盖语音克隆、多语言合成、副语言标签、多人播客、情感与方言控制、自由描述、声音设计等 10 项任务。</p>
+        <p>界面需要启用 JavaScript 才能交互。模型权重见
+          <a href="https://huggingface.co/inclusionAI/Ming-3.0-tts-tiny">Hugging Face</a> 与
+          <a href="https://www.modelscope.cn/models/inclusionAI/Ming-3.0-tts-tiny">ModelScope</a>，
+          推理代码见 <a href="https://github.com/inclusionAI/Ming-3.0-tts">官方仓库</a>。</p>
+      </div>
+    </div>
+  </noscript>
+
+  <script src="assets/js/config.js?v=1.0.5"></script>
+  <script src="assets/js/data.js?v=1.0.5"></script>
+  <script src="assets/js/api.js?v=1.0.5"></script>
+  <script src="assets/js/app.js?v=1.0.5"></script>
+</body>
+</html>

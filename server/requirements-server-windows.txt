@@ -1,0 +1,32 @@
+# Native Windows (experimental) environment for Ming-3.0-tts-tiny.
+# WSL2 is recommended; use requirements-server.txt there instead.
+# Tested target: Windows 10/11, Python 3.10.x, NVIDIA driver >= 525.
+#
+#   .venv\Scripts\python -m pip install -r server\requirements-server-windows.txt
+
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+torch==2.7.1+cu118
+torchaudio==2.7.1+cu118
+transformers==4.46.3
+tokenizers==0.20.3
+safetensors==0.8.0
+accelerate==1.14.0
+huggingface_hub==0.36.2
+triton-windows==3.3.1.post21
+packaging==26.2
+numpy==1.26.4
+scipy==1.15.3
+soundfile==0.14.0
+onnxruntime==1.23.2
+einops==0.8.2
+einx==0.4.3
+loguru==0.7.3
+x-transformers==2.7.4
+fla-core==0.4.2
+
+# HTTP API and gateway
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+httpx>=0.27,<1.0
+python-multipart>=0.0.9,<1.0
