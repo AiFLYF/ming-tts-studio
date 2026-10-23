@@ -10,6 +10,9 @@
   const TASKS = DATA.TASKS || [];
   const ICONS = DATA.ICONS || {};
   const LANGUAGE_LABELS = DATA.LANGUAGE_LABELS || {};
+  const TAG_HINTS = DATA.TAG_HINTS || {};
+  // Languages the `seed` task accepts; everything else goes to `multilingual`.
+  const SEED_LANGUAGES = ["Chinese", "English"];
   const EMOTIONS = DATA.EMOTIONS || [];
   const VOICE_GROUPS = DATA.VOICE_GROUPS || [];
 
@@ -319,6 +322,7 @@
     dom.apiBaseInput = $("#apiBaseInput");
     dom.defaultBaseHint = $("#defaultBaseHint");
     dom.connectionResult = $("#connectionResult");
+    dom.mixedContentNote = $("#mixedContentNote");
     dom.testConnectionBtn = $("#testConnectionBtn");
     dom.resetApiBtn = $("#resetApiBtn");
     dom.saveSettingsBtn = $("#saveSettingsBtn");
@@ -545,15 +549,21 @@
     `;
   }
 
-  function requirementBadge(optional) {
-    return optional ? '<span class="opt">演示可跳过</span>' : '<span class="req">必填</span>';
+  function requirementBadge(task, isDemo) {
+    if (task && task.ref === "optional") {
+      return '<span class="opt">可选</span>';
+    }
+    return isDemo ? '<span class="opt">演示可跳过</span>' : '<span class="req">必填</span>';
   }
 
   function textField(task, draft) {
     const tags = task.insertTags ? `
       <div class="tag-chips">
         <span class="chip-label">插入标签</span>
-        ${task.insertTags.map(tag => `<button class="chip" type="button" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`).join("")}
+        ${task.insertTags.map(tag => {
+          const hint = TAG_HINTS[tag] || "";
+          return `<button class="chip" type="button" data-tag="${escapeHtml(tag)}" title="${escapeHtml(hint || tag)}" aria-label="插入 ${escapeHtml(tag)}${hint ? "（" + escapeHtml(hint) + "）" : ""}">${escapeHtml(tag)}</button>`;
+        }).join("")}
       </div>
     ` : "";
 
@@ -587,7 +597,7 @@
         <span class="upload-icon">${UI.upload}</span>
         <span class="upload-copy">
           <strong class="upload-title">${isDemo ? "演示模式下无法上传" : "上传参考音频"}</strong>
-          <small class="upload-sub">${isDemo ? "连接 API 后可上传 WAV / MP3 / FLAC" : "拖拽或点击选择 · WAV / MP3 / FLAC · 最大 50 MB"}</small>
+          <small class="upload-sub">${isDemo ? "连接 API 后可上传 WAV / MP3 / FLAC" : "拖拽或点击选择 · 3–15 秒清晰人声 · WAV / MP3 / FLAC · 最大 50 MB"}</small>
         </span>
         <span class="upload-action">${isDemo ? "连接 API" : "选择文件"}</span>
       </div>
@@ -645,15 +655,20 @@
 
   function referenceField(task, draft, isDemo) {
     const upload = state.refs[task.id];
-    const note = upload ? "已就绪" : (isDemo ? "演示模式 · 无需上传" : "建议 3–15 秒清晰人声");
+    const optional = task.ref === "optional";
+    const idleNote = isDemo
+      ? "演示模式 · 无需上传"
+      : (optional ? "不传则音色完全由指令与文本决定" : "建议 3–15 秒清晰人声");
+    const note = upload ? "已就绪" : idleNote;
     return `
       <div class="field">
         <div class="field-head">
-          <label>参考音频 ${requirementBadge(isDemo)}</label>
+          <label>参考音频 ${requirementBadge(task, isDemo)}</label>
           <span class="field-note">${escapeHtml(note)}</span>
         </div>
         ${upload ? refCardMarkup(task, upload) : uploadZoneMarkup(isDemo)}
         ${isDemo ? '<p class="field-help">演示模式可跳过上传，生成结果会使用仓库内置示例音频。</p>' : ""}
+        ${optional && !upload && !isDemo ? '<p class="field-help">官方默认不推荐传参考音频。传了会克隆该音色（等价于纯音色条件），再由上面的指令控制表演；不传则音色由指令与文本决定。</p>' : ""}
       </div>
       ${task.promptText ? promptTextField(draft, isDemo) : ""}
     `;
@@ -798,6 +813,7 @@
           <span class="chip-label">常用</span>
           ${quick.map(([name, note]) => `<button class="chip${name === draft.ip ? " is-active" : ""}" type="button" data-action="pick-voice" data-value="${escapeHtml(name)}" title="${escapeHtml(note)}">${escapeHtml(name)}</button>`).join("")}
         </div>
+        <p class="field-help">内置音色只有中文与英语（112 + 5）。日语、韩语、德语、法语、西班牙语请用「多语言合成」克隆音色——音色跟着参考音频走。</p>
         <p class="field-help">官方音色表里有 62 个声音带情绪变体，必须选定情绪——后端会收到 <code>灵信远_高兴</code> 这样的完整标识，只传基名会被拒绝。</p>
       </div>
     `;
@@ -823,16 +839,21 @@
 
   function languageField(task, draft) {
     const selected = draft.language || task.defaultLanguage || (task.languages && task.languages[0]) || "";
+    const limited = task.id === "paralinguistic";
+    const note = limited ? "官方该任务仅中文 / 英语" : `${(task.languages || []).length} 种语言`;
+    const help = limited
+      ? "副语言标签只在中文 / 英语上训练；其他语言请改用「多语言合成」。"
+      : "中文、英语走零样本克隆，其余五种走多语言合成——两者条件方式相同，界面按所选语言自动切换。音色由参考音频决定，可跨语言使用。";
     return `
       <div class="field">
         <div class="field-head">
           <label for="languageSelect">目标语言</label>
-          <span class="field-note">参考音频建议使用同一语言</span>
+          <span class="field-note">${escapeHtml(note)}</span>
         </div>
         <select class="select" id="languageSelect" data-field="language">
           ${(task.languages || []).map(language => `<option value="${escapeHtml(language)}" ${language === selected ? "selected" : ""}>${escapeHtml(LANGUAGE_LABELS[language] || language)}</option>`).join("")}
         </select>
-        <p class="field-help">参考文本与目标文本应保持一致的语言，以获得更稳定的发音。</p>
+        <p class="field-help">${escapeHtml(help)}</p>
       </div>
     `;
   }
@@ -974,6 +995,10 @@
       html += addSection("内置配音员", "Voice cast", ipField(draft));
     } else if (task.id === "freeform") {
       html += addSection("表达指令", "Direction", instructionField(draft, isDemo));
+      // Freeform accepts an optional reference clip: with one, the model clones
+      // that voice and still follows the instruction; without one it invents a
+      // voice from the instruction alone.
+      html += addSection("参考音频（可选）", "Reference", referenceField(task, draft, isDemo));
     } else {
       html += addSection("参考音频", "Reference", referenceField(task, draft, isDemo));
     }
@@ -1385,6 +1410,11 @@
       const instruction = String(draft.instruction || "").trim();
       if (!instruction && !demo) throw new Error("请填写表达指令。");
       if (instruction) request.instruction = instruction;
+      // One optional reference: clones that voice while still following the
+      // instruction. Omitted, the voice comes from the instruction alone.
+      if (!demo && state.refs[task.id]) {
+        request.prompt_wav = speakerReference(state.refs[task.id]);
+      }
       return request;
     }
 
@@ -1401,6 +1431,13 @@
 
     if (task.languages) {
       request.target_language = draft.language || task.defaultLanguage || task.languages[0];
+    }
+    // The checkpoint splits the seven languages across two task ids with
+    // identical conditioning (one reference + its transcript): seed whitelists
+    // Chinese/English, multilingual whitelists the other five. Send whichever
+    // one actually allows this language so either form can offer all seven.
+    if ((task.id === "seed" || task.id === "multilingual") && request.target_language) {
+      request.task = SEED_LANGUAGES.includes(request.target_language) ? "seed" : "multilingual";
     }
     if (task.id === "basic") {
       request.speed = draft.speed || "中速";
@@ -2468,7 +2505,14 @@
       dom.apiBaseLabel.textContent = client.baseUrl;
       dom.apiBaseLabel.title = client.baseUrl;
     }
-    if (dom.docsLink) dom.docsLink.href = client.docsUrl();
+    if (dom.docsLink) {
+      // A live gateway serves its own OpenAPI page; a static deployment has
+      // nothing at /docs, so point at the written reference instead of a 404.
+      const live = state.mode === "online" || state.mode === "degraded";
+      dom.docsLink.href = live ? client.docsUrl() : (CONFIG.apiDocs || client.docsUrl());
+      dom.docsLink.title = live ? "网关自带的 OpenAPI 文档" : "接口文档（GitHub）";
+      dom.docsLink.removeAttribute("aria-disabled");
+    }
     if (dom.apiBaseInput) dom.apiBaseInput.placeholder = client.defaultBaseUrl;
     if (dom.defaultBaseHint) {
       dom.defaultBaseHint.innerHTML = `默认地址：<code>${escapeHtml(client.defaultBaseUrl)}</code> · 当前页面：<code>${escapeHtml(window.location.origin)}</code>`;
@@ -2482,6 +2526,9 @@
     if (dom.connectionResult) dom.connectionResult.hidden = true;
     if (dom.testConnectionBtn) dom.testConnectionBtn.disabled = false;
     if (dom.apiBaseInput) dom.apiBaseInput.value = client.baseUrl;
+    // Only relevant when the UI is served over HTTPS (GitHub Pages, reverse
+    // proxy): plain-http gateways can never be reached from there.
+    if (dom.mixedContentNote) dom.mixedContentNote.hidden = window.location.protocol !== "https:";
     updateApiLabels();
     openModal("settings", null, dom.apiBaseInput);
   }
@@ -2511,6 +2558,7 @@
       dom.apiBaseInput.focus();
       return;
     }
+
 
     const button = dom.testConnectionBtn;
     if (button) {
@@ -2559,6 +2607,7 @@
       dom.apiBaseInput.focus();
       return;
     }
+
 
     const changed = target !== client.baseUrl;
     client.setBase(target);

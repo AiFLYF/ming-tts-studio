@@ -128,6 +128,8 @@ python3 -m http.server 8082
 ## 功能特性
 
 - **全部 10 项官方任务**：语音克隆、多语言、副语言标签、多人播客、基础属性、情感、方言、自由描述、声音设计、内置声音。每个任务都有独立表单、提示、示例与参数校验。
+- **7 种目标语言**：中文、英语、日语、韩语、德语、法语、西班牙语。语音克隆与多语言合成这两个任务都开放全部 7 种——官方按语言把它们拆成 `seed` 与 `multilingual` 两个 id，但条件方式完全相同，界面按所选语言自动提交对应的那个。
+- **14 种内联标签**：呼吸、咳嗽、叹息、笑声、犹豫，以及惊讶 / 不满 / 确认 / 疑问四种语气下的多种写法（共 14 个），一键插入文本，悬停有中文说明。标签区分大小写、必须带方括号。
 - **官方全量音色表**：117 个内置音色（50 个纯音色 + 62 个带情绪变体 + 5 个英文），合计 484 个可选声音。带变体的音色要在界面上再选一次情绪，前端自动拼成 `灵信远_高兴` 这样的完整标识——官方明确要求不能只传基名。
 - **真实的上传闭环**：拖拽或选择 WAV / MP3 / FLAC，显示时长、采样率与大小，浏览器内直接试听；服务端音频库支持搜索、复用和二次确认删除。
 - **会自己兜底的演示模式**：API 不可达时自动切换为内置示例音频，界面仍可完整走通；连接恢复后一键回到在线模式。
@@ -147,18 +149,22 @@ python3 -m http.server 8082
 | --- | --- | --- | --- | --- |
 | 01 | 语音克隆 | Seed · Zero-shot | 必需 | 复刻音色、任意文本朗读 |
 | 02 | 多语言合成 | Multilingual | 必需 | 同一音色跨语言 |
-| 03 | 副语言标签 | Paralinguistic | 必需 | 笑声、叹息、咳嗽等细节 |
+| 03 | 副语言标签 | Paralinguistic | 必需 | 14 种内联标签：呼吸、咳嗽、叹息、笑声、犹豫、惊讶、不满、确认、疑问 |
 | 04 | 多人对话 | Podcast | 2–4 份 | 双人 / 多人播客 |
 | 05 | 基础属性 | Basic Attributes | 必需 | 语速、音调、音量微调 |
 | 06 | 情感控制 | Emotion | 必需 | 七种情绪表达 |
 | 07 | 方言控制 | Dialect | 必需 | 川渝话、广粤话 |
-| 08 | 自由描述 | Freeform | 不需要 | 用文字指导表演 |
+| 08 | 自由描述 | Freeform | 可选 | 用文字指导表演；带参考音频则克隆音色 |
 | 09 | 声音设计 | Voice Design | 不需要 | 从描述创造全新音色 |
 | 10 | 内置声音 | Built-in Voice | 不需要 | 快速使用官方配音员 |
+
+> 语言：7 种（中文、英语、日语、韩语、德语、法语、西班牙语）。官方把语音克隆限定在中文/英语、多语言合成限定在其余五种；界面把 7 种都放在 01 和 02 下，按语言自动切换底层 `task`。
 
 ## 接入 API
 
 前端只需要一个兼容以下接口的 HTTP 服务。**任何实现了这套约定的服务都可以直接接入**，不限于官方实现。
+
+完整参考（字段取值、别名、错误码、curl / JS / Python 示例、HTTPS 页面连 http 网关的做法）在 **[docs/API.md](docs/API.md)**；网关跑起来后，`http://<host>:8081/docs` 还有一份交互式 OpenAPI。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -287,20 +293,24 @@ X-Task: seed
 
 请求体字段与官方 Python API 一一对应（`task`、`text`、`prompt_wav`、`prompt_text`、`target_language`），网关只需做薄转发。
 
+取值同时接受官方短码与中文（后端会归一化）：`target_language` 可用 `Japanese` 或 `ja`；`dialect` 可用 `川渝话` / `广粤话` / `cantonese` / `chuanyu dialect` / `四川话` / `粤语`；`emotion` 可用 `高兴` 或 `happy`。
+
 | 任务 | `task` | 必填字段 | 关键参数 |
 | --- | --- | --- | --- |
 | 语音克隆 | `seed` | `text`、`prompt_wav`、`prompt_text`、`target_language` | `target_language`：`Chinese` / `English` |
-| 多语言合成 | `multilingual` | `text`、`prompt_wav`、`prompt_text`、`target_language` | 日语 / 德语 / 西班牙语 / 法语 / 韩语 |
-| 副语言标签 | `paralinguistic` | `text`、`prompt_wav`、`prompt_text`、`target_language` | 文本中插入 `[Sigh]`、`[Laughter]` 等标签 |
+| 多语言合成 | `multilingual` | `text`、`prompt_wav`、`prompt_text`、`target_language` | 日语 / 韩语 / 德语 / 法语 / 西班牙语 |
+| 副语言标签 | `paralinguistic` | `text`、`prompt_wav`、`prompt_text`、`target_language` | 14 种内联标签，如 `[Sigh]`、`[Question-huh]` |
 | 多人对话 | `podcast` | `text`、`prompt_wav[]`、`prompt_text[]` | 至少 2 位说话人，脚本行以 `speaker_1:` 开头 |
 | 基础属性 | `basic` | `text`、`prompt_wav` | `speed`、`pitch`、`volume` |
 | 情感控制 | `emotion` | `text`、`prompt_wav`、`emotion` | 中性 / 悲伤 / 愤怒 / 高兴 / 惊讶 / 恐惧 / 厌恶 |
 | 方言控制 | `dialect` | `text`、`prompt_wav`、`dialect` | `川渝话` / `广粤话` |
-| 自由描述 | `freeform` | `text`、`instruction` | 无需参考音频，用自然语言描述表演方式 |
+| 自由描述 | `freeform` | `text`、`instruction` | 参考音频可选（传了就克隆该音色），用自然语言描述表演方式 |
 | 声音设计 | `voice_design` | `text`、`style` | 无需参考音频，用文字创造新音色 |
 | 内置声音 | `ip` | `text`、`ip` | 选择官方配音员，无需参考音频 |
 
 > 表中的「必填」对应界面的校验规则。部分后端对 `basic` / `emotion` / `dialect` 的参考音频允许省略，但本界面为了输出稳定会要求上传。
+
+> `seed` 与 `multilingual` 的官方语言白名单是分开的（前者中文/英语，后者其余五种），但两者条件方式完全相同（一段参考音频 + 对应文本）。界面把 7 种语言都放在这两个任务下，提交时按语言自动选 `task`；直接调 API 时仍按官方白名单校验，送错语言会得到 400。
 
 ## 常见问题
 
@@ -351,43 +361,44 @@ NVIDIA GPU + 驱动 525 以上，Python 必须是 3.10（官方 tiny 版锁定 t
 
 ## 部署
 
-后端部署（GPU 选择、WSL/systemd、Nginx 反代、常见报错）另有两篇详细教程：[Linux / WSL2](docs/DEPLOY_LINUX.md) · [Windows](docs/DEPLOY_WINDOWS.md)。
+前端只有两个落点：**GitHub Pages**（公网展示，后端另接）或**与网关同源**（自托管一体化）。本地开个静态服务看界面的命令见 [30 秒上手](#30-秒上手)；后端部署细节见 [Linux / WSL2](docs/DEPLOY_LINUX.md) · [Windows](docs/DEPLOY_WINDOWS.md)。
 
 ### GitHub Pages
 
-仓库已包含 [`.github/workflows/pages.yml`](.github/workflows/pages.yml)，推送到 `main` 后自动发布：
+仓库已含 [`.github/workflows/pages.yml`](.github/workflows/pages.yml)，推到 `main` 就发布，不需要构建。**首次**只需启用一次：
 
-1. 将仓库推送到 GitHub；
-2. 打开 **Settings → Pages**，把 **Source** 设为 **GitHub Actions**；
-3. 等待 `Deploy static site to Pages` 工作流完成。
+1. **Settings → Pages → Source** 选 **GitHub Actions**（不要选分支）；
+2. 等 `Deploy static site to Pages` 跑绿。
 
-发布前还有两处要处理：
+> 顺序有讲究：Pages 没启用就先推送，`configure-pages` 会在 Configure 步骤直接报 `Get Pages site failed ... Not Found`，10 秒失败；启用后重跑一次即可。
 
-- `index.html` 里的绝对地址已按 `aiflyf/ming-tts-studio` 填好，改仓库名或绑自定义域名时记得同步（`og:url`、`og:image`、`twitter:image` 与结构化数据里的 `url`、`screenshot` 共 5 处）。社交平台和搜索引擎都不会解析相对的 `og:image`。
-- 工作流只把前端文件 `index.html` / `sw.js` / `assets` / `screenshots` / `site.webmanifest` 放进 `_site` 再发布，`server/`、`models/`、`uploads/`、`.env` 不会暴露到公网。
+页面纯静态、路径全相对，可以住在子路径下（如 `https://aiflyf.github.io/ming-tts-studio/`），`.nojekyll` 已包含。工作流只把 `index.html`、`sw.js`、`assets`、`screenshots`、`site.webmanifest`、`.nojekyll` 放进 `_site`，`server/`、`models/`、`uploads/`、`.env` 不会上网。
 
-页面完全静态，路径均为相对路径，可部署在项目子路径下（如 `https://aiflyf.github.io/ming-tts-studio/`）。`.nojekyll` 已包含，避免 Jekyll 处理资源目录。
+**改仓库名或绑自定义域名**时，`index.html` 里 5 处绝对地址要一起换：`og:url`、`og:image`、`twitter:image`，以及结构化数据里的 `url` 与 `screenshot`。社交平台不会解析相对的 `og:image`。
 
-部署到公网时请确认：
+页面要连自己的后端还有两条硬约束：API 必须是 HTTPS（否则被浏览器按混合内容拦掉），内网地址公网浏览器也够不着（要反代或隧道）。跨域细节见 [跨域要求](#跨域要求)，暴露面见 [安全与网络暴露](#安全与网络暴露)。
 
-- API 使用 HTTPS（GitHub Pages 是 HTTPS）；
-- 服务端 CORS 允许 Pages 域名，并暴露 `X-Duration`、`X-Sample-Rate`、`X-Task`；
-- 内网 API 无法被公网浏览器访问，需要反向代理或安全隧道。
+### 从 HTTPS 页面连 http:// 网关
+
+GitHub Pages 是 HTTPS，浏览器默认禁止它请求 `http://` 地址（混合内容拦截），表现是「连接 API 一直转圈，最后 Failed to fetch」。两种办法：
+
+1. **直接打开网关自带的页面** `http://<网关IP>:8081/studio/` —— 同源，零设置，推荐；
+2. **继续用 Pages**：点地址栏左侧图标 → **网站设置** → 把「**不安全内容**」设为「**允许**」→ 刷新本页，再填地址。允许后可以直连。
+
+局域网 IP 还要过 Chrome 的 Private Network Access 预检，网关与 worker 都会回 `Access-Control-Allow-Private-Network: true`。界面检测到被拦时会直接把这两个办法写在错误提示里。
 
 ### 与网关同源托管
 
-`./start.sh` 已经这么做：网关把本目录的 `index.html`、`assets/`、`sw.js`、`site.webmanifest` 挂在 `/studio/` 下，其余路径（`server/`、权重、`.env`）不对外；上传目录仅以 `/uploads/<文件名>` 形式只读公开——任何人拿到文件名都能试听，这一点在公网部署时要自己权衡。
+`./start.sh` 已经这么做：网关把 `index.html`、`assets/`、`sw.js`、`site.webmanifest` 挂在 `/studio/`，其余路径不对外；上传目录仅以 `/uploads/<文件名>` 只读公开。
 
-如果你只想要那一段逻辑，等价写法是：
+自己实现时最小只需两步，同源场景不需要 CORS：
 
 ```python
-from fastapi.staticfiles import StaticFiles
-
 app.mount("/studio/assets", StaticFiles(directory="ming-tts-studio/assets"), name="studio-assets")
 # 再加 GET /studio/ -> FileResponse("ming-tts-studio/index.html")
 ```
 
-同源场景不需要 CORS，前端默认 API 地址会自动指向页面源。
+前端默认 API 地址会自动指向页面源。
 
 ## 项目结构
 
@@ -413,7 +424,7 @@ ming-tts-studio/
 │   └── requirements-*.txt      # 固定版本的运行时依赖
 ├── scripts/setup_linux.sh · setup_windows.ps1
 ├── start.sh · stop.sh · status.sh   # 及对应 .bat（Windows 无 .venv 时走 WSL2）
-├── docs/DEPLOY_LINUX.md · DEPLOY_WINDOWS.md
+├── docs/DEPLOY_LINUX.md · DEPLOY_WINDOWS.md · API.md
 ├── screenshots/                # README 展示图与操作动图
 ├── .github/workflows/pages.yml
 ├── site.webmanifest · .nojekyll · .env.example
@@ -474,7 +485,7 @@ gateway.py :8081   ← launcher.py 按 GPU 数量拉起，健康状态汇总在 
 
 **Ming TTS Studio** is an unofficial, self-hosted web UI for [Ming-3.0-tts](https://github.com/inclusionAI/Ming-3.0-tts) — Ant Group's open-source speech synthesis family (7.9B / 1.3B-active MoE, MIT license).
 
-- **All 10 official tasks**: zero-shot voice cloning, multilingual synthesis, 14 paralinguistic tags, multi-speaker podcast, speed/pitch/volume, 7 emotions, Sichuanese & Cantonese, freeform direction, voice design, and 117 built-in voices (484 selectable variants).
+- **All 10 official tasks**: zero-shot voice cloning, multilingual synthesis across 7 target languages, 14 paralinguistic tags, multi-speaker podcast, speed/pitch/volume, 7 emotions, Sichuanese & Cantonese, freeform direction (reference clip optional), voice design, and 117 built-in voices (484 selectable variants).
 - **Pure static front end**: no npm, no bundler, no framework, no build step. Serve the folder and open it.
 - **Batteries-included backend**: `server/` ships a FastAPI gateway plus one worker per GPU with least-in-flight scheduling, model auto-download, warm-up and PID-based start/stop. One command brings the whole thing up.
 - **Demo mode by default**: without a backend the whole interface still works against a bundled sample, so you can evaluate the UX before downloading a multi-GB checkpoint.

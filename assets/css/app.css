@@ -1777,6 +1777,18 @@ svg { display: block; }
 }
 .settings-note strong { color: var(--muted); font-size: 10px; font-weight: 550; }
 .settings-note p { margin-top: 4px; color: var(--dim); font-size: 9.5px; line-height: 1.65; }
+.settings-note code { color: var(--muted); font-family: var(--mono); font-size: 9px; }
+/* Shown when the page itself is HTTPS: a plain-http gateway is unreachable. */
+.settings-note.is-warn {
+  background: rgba(242, 198, 109, 0.07);
+  border-color: rgba(242, 198, 109, 0.28);
+}
+.settings-note.is-warn strong { color: #f2c66d; }
+.settings-note.is-warn p { color: #cbb98f; }
+.settings-steps { margin: 7px 0 0; padding-left: 17px; }
+.settings-steps li { margin-top: 5px; color: #cbb98f; font-size: 9.5px; line-height: 1.7; }
+.settings-steps b { color: #f2c66d; font-weight: 550; }
+.settings-steps code { color: #f2c66d; }
 
 .settings-actions {
   display: flex;

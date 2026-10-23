@@ -18,6 +18,41 @@
     return "http://127.0.0.1:8081";
   }
 
+  const LOOPBACK_RE = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:\/|$)/i;
+
+  function isLoopback(url) {
+    return LOOPBACK_RE.test(String(url || ""));
+  }
+
+  /** An HTTPS page may not fetch plain http:// — the browser blocks the request
+   *  and `fetch` only reports "Failed to fetch", which reads like "the service
+   *  is down" even when it is running fine on another machine. */
+  function blockedByMixedContent(url) {
+    return window.location.protocol === "https:"
+      && /^http:\/\//i.test(String(url || ""))
+      && !isLoopback(url);
+  }
+
+  function hostOf(url) {
+    try {
+      return new URL(url).host;
+    } catch (error) {
+      return String(url || "");
+    }
+  }
+
+  /** Turn a network-level failure into something the user can act on. */
+  function describeConnectionFailure(url) {
+    const host = hostOf(url);
+    if (blockedByMixedContent(url)) {
+      return `连不上 ${host}：这个页面是 HTTPS，浏览器默认禁止它请求 http:// 地址（混合内容拦截）。`
+        + "两种办法——① 允许本页加载不安全内容：点地址栏左侧的图标 → 网站设置 → 把「不安全内容」改成「允许」→ 刷新本页再连；"
+        + `② 直接打开网关自带的页面 http://${host}/studio/（同源，什么都不用设）。`;
+    }
+    return `连不上 ${host}。常见原因：网关没启动、端口写错、被防火墙拦截，或服务端没放行当前域名的跨域请求。`
+      + "如果网关只在你的内网/本机，公网浏览器本来就访问不到它。";
+  }
+
   function readStoredBase() {
     try {
       return localStorage.getItem(STORAGE_KEY) || "";
@@ -107,6 +142,15 @@
       return this.baseUrl;
     }
 
+    /** True when the browser would block this URL before the request leaves. */
+    blockedByMixedContent(base) {
+      return blockedByMixedContent(normalizeBase(base) || this.defaultBaseUrl);
+    }
+
+    describeConnectionFailure(base) {
+      return describeConnectionFailure(normalizeBase(base) || this.defaultBaseUrl);
+    }
+
     url(path) {
       if (!path) return "";
       if (/^https?:\/\//i.test(path)) return path;
@@ -126,7 +170,7 @@
         if (error.name === "AbortError") {
           throw new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒），请检查 API 地址与网络。`);
         }
-        throw new Error(`无法连接 API：${this.baseUrl}`);
+        throw new Error(describeConnectionFailure(this.baseUrl));
       } finally {
         window.clearTimeout(timer);
       }
@@ -256,7 +300,12 @@
         };
       } catch (error) {
         if (error.name === "AbortError") throw new Error("连接超时，请检查地址和网络。");
-        throw new Error(error.message || "无法连接该地址。");
+        const message = String(error.message || "");
+        // Browsers only say "Failed to fetch" for a blocked or refused request.
+        if (!message || /failed to fetch|networkerror|load failed/i.test(message)) {
+          throw new Error(describeConnectionFailure(target));
+        }
+        throw new Error(message);
       } finally {
         window.clearTimeout(timer);
       }

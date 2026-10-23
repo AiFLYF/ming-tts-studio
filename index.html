@@ -54,7 +54,7 @@
   <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/img/apple-touch-icon.png">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="assets/css/app.css?v=1.0.5">
+  <link rel="stylesheet" href="assets/css/app.css?v=1.0.6">
 </head>
 <body>
   <div class="ambient" aria-hidden="true">
@@ -189,7 +189,7 @@
           <span>AiFLYF</span>
         </a>
         <span class="footer-sep"></span>
-        <span id="footerVersion">v1.0.5</span>
+        <span id="footerVersion">v1.0.6</span>
       </footer>
     </main>
   </div>
@@ -255,6 +255,15 @@
         </div>
         <p class="field-help" id="defaultBaseHint"></p>
 
+        <div class="settings-note is-warn" id="mixedContentNote" hidden>
+          <strong>这个页面是 HTTPS，怎么连 http:// 网关</strong>
+          <ol class="settings-steps">
+            <li><b>最省事：</b>直接打开网关自带的页面 <code>http://&lt;网关IP&gt;:8081/studio/</code> —— 同源，不用任何设置。</li>
+            <li><b>想继续用这个页面：</b>点地址栏左侧的图标 → <b>网站设置</b> → 把「<b>不安全内容</b>」设为「<b>允许</b>」→ 刷新本页，再回来填地址。</li>
+          </ol>
+          <p>网关默认已放行跨域（<code>allow_origins=*</code>）；换成自定义域名时记得同步。</p>
+        </div>
+
         <div class="connection-result" id="connectionResult" hidden></div>
 
         <div class="settings-note">
@@ -294,9 +303,9 @@
     </div>
   </noscript>
 
-  <script src="assets/js/config.js?v=1.0.5"></script>
-  <script src="assets/js/data.js?v=1.0.5"></script>
-  <script src="assets/js/api.js?v=1.0.5"></script>
-  <script src="assets/js/app.js?v=1.0.5"></script>
+  <script src="assets/js/config.js?v=1.0.6"></script>
+  <script src="assets/js/data.js?v=1.0.6"></script>
+  <script src="assets/js/api.js?v=1.0.6"></script>
+  <script src="assets/js/app.js?v=1.0.6"></script>
 </body>
 </html>

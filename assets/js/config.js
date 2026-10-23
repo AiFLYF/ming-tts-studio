@@ -15,11 +15,17 @@
  * serviceWorker:
  *   - Offline shell caching. Set to false if you deploy behind a proxy that
  *     already handles caching and you do not want a second cache layer.
+ *
+ * apiDocs:
+ *   - Where the header's "API 文档" link points when no gateway is connected.
+ *     A live gateway serves its own OpenAPI page at /docs; a static deployment
+ *     (GitHub Pages) has nothing there, so it falls back to this page.
  */
 window.MING_CONFIG = {
   apiBase: "",
   demoAudio: "assets/audio/demo-zh.wav",
   healthIntervalMs: 20000,
-  version: "1.0.5",
-  serviceWorker: true
+  version: "1.0.6",
+  serviceWorker: true,
+  apiDocs: "https://github.com/AiFLYF/ming-tts-studio/blob/main/docs/API.md"
 };

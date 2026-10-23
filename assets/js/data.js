@@ -24,6 +24,31 @@
     Korean: "韩语（Korean）"
   };
 
+  // Every language the tiny checkpoint supports. Upstream splits them across two
+  // tasks — seed accepts Chinese/English, multilingual accepts the other five —
+  // even though both use identical conditioning (one reference + its transcript).
+  // The UI offers all seven and lets buildRequest() pick the matching task.
+  const ALL_LANGUAGES = ["Chinese", "English", "Japanese", "Korean", "German", "French", "Spanish"];
+
+  // Chinese gloss for each of the 14 official inline tags, shown as a tooltip
+  // and in the chip's accessible name. Keys must match insertTags verbatim.
+  const TAG_HINTS = {
+    "[Breathing]": "换气",
+    "[Cough]": "咳嗽",
+    "[Sigh]": "叹息",
+    "[Laughter]": "笑声",
+    "[Uhm]": "犹豫、语气词",
+    "[Surprise-ah]": "惊讶「啊」",
+    "[Surprise-oh]": "惊讶「哦」",
+    "[Dissatisfaction-hnn]": "不满「哼」",
+    "[Confirmation-en]": "确认「嗯」",
+    "[Question-ei]": "疑问「诶」",
+    "[Question-ah]": "疑问「啊」",
+    "[Question-en]": "疑问「嗯」",
+    "[Question-oh]": "疑问「哦」",
+    "[Question-huh]": "疑问「哈」"
+  };
+
   const EMOTIONS = [
     ["中性", "#9aa69c"], ["高兴", "#f2c66d"], ["悲伤", "#7eb6ff"],
     ["愤怒", "#ff8697"], ["惊讶", "#c3a6ff"], ["恐惧", "#6fe7d2"], ["厌恶", "#b7d879"]
@@ -165,20 +190,20 @@
     {
       id: "seed", index: "01", group: "克隆与语言", name: "语音克隆", en: "Seed · Zero-shot",
       desc: "上传一段清晰的参考音频，填写音频里真实说出的文本，用这个音色朗读任意目标内容。",
-      tags: ["参考音频必填", "参考文本必填", "prompt_latent"],
+      tags: ["参考音频必填", "参考文本必填", "7 种语言"],
       ref: "required", promptText: true,
-      languages: ["Chinese", "English"],
+      languages: ALL_LANGUAGES,
       textHint: "建议 1–500 字，标点会影响停顿。",
       examples: {
         text: "你好，我是你刚刚克隆出来的声音。接下来，我会用这个音色为你朗读任意文字。"
       }
     },
     {
-      id: "multilingual", index: "02", group: "克隆与语言", name: "多语言合成", en: "Multilingual",
-      desc: "使用目标语言的参考音频，合成日语、德语、西班牙语、法语或韩语，让同一个音色跨越语言。",
-      tags: ["参考音频必填", "参考文本必填", "5 种语言"],
+      id: "multilingual", index: "02", group: "克隆与语言",       name: "多语言合成", en: "Multilingual",
+      desc: "同一个音色跨越语言：用参考音频的音色合成中文、英语、日语、韩语、德语、法语或西班牙语。",
+      tags: ["参考音频必填", "参考文本必填", "7 种语言"],
       ref: "required", promptText: true,
-      languages: ["Japanese", "German", "Spanish", "French", "Korean"],
+      languages: ALL_LANGUAGES,
       defaultLanguage: "Japanese",
       textHint: "参考音频、参考文本与目标文本应使用同一目标语言。",
       examples: {
@@ -187,12 +212,19 @@
     },
     {
       id: "paralinguistic", index: "03", group: "克隆与语言", name: "副语言标签", en: "Paralinguistic",
-      desc: "在文本中插入标签，合成带笑声、叹息、咳嗽等自然特征的声音。",
-      tags: ["参考音频必填", "参考文本必填", "标签控制"],
+      desc: "在文本中插入 14 种内联标签，合成带呼吸、咳嗽、叹息、笑声、犹豫与疑问语气的声音。",
+      tags: ["参考音频必填", "参考文本必填", "14 种内联标签"],
       ref: "required", promptText: true,
       languages: ["Chinese", "English"],
-      insertTags: ["[Breathing]", "[Cough]", "[Sigh]", "[Laughter]", "[Surprise-ah]"],
-      textHint: "标签前后保留空格，例如：[Sigh] 今天好累啊。",
+      // The official catalog is exactly these 14 tags. They are case-sensitive
+      // and must keep their brackets, so they are inserted verbatim.
+      insertTags: [
+        "[Breathing]", "[Cough]", "[Sigh]", "[Laughter]", "[Uhm]",
+        "[Surprise-ah]", "[Surprise-oh]", "[Dissatisfaction-hnn]",
+        "[Confirmation-en]", "[Question-ei]", "[Question-ah]",
+        "[Question-en]", "[Question-oh]", "[Question-huh]"
+      ],
+      textHint: "标签区分大小写、必须带方括号，前后留空格，例如：[Sigh] 今天好累啊。",
       examples: {
         text: "[Sigh] 今天真的好累啊，[Laughter] 不过看到你心情就好多了。"
       }
@@ -200,7 +232,7 @@
     {
       id: "podcast", index: "04", group: "克隆与语言", name: "多人对话", en: "Podcast",
       desc: "上传多位说话人的参考音频，按 speaker_N: 脚本生成一档多人播客。",
-      tags: ["至少 2 位说话人", "多参考音频", "multi_speaker"],
+      tags: ["2–4 位说话人", "每人一段参考音频", "speaker_N 脚本"],
       ref: "podcast",
       textHint: "每行以 speaker_1: / speaker_2: 开头，编号必须与说话人一一对应。",
       examples: {
@@ -221,7 +253,7 @@
     {
       id: "emotion", index: "06", group: "风格控制", name: "情感控制", en: "Emotion",
       desc: "保持参考音频的音色，合成指定情绪下的表达。",
-      tags: ["参考音频必填", "7 种情绪", "speaker_only"],
+      tags: ["参考音频必填", "7 种情绪", "情绪独立控制"],
       ref: "required",
       defaults: { emotion: "中性" },
       textHint: "文本内容与情绪相匹配时，效果更自然。",
@@ -242,9 +274,9 @@
     },
     {
       id: "freeform", index: "08", group: "创意与内置", name: "自由描述", en: "Freeform",
-      desc: "用自然语言描述语气、节奏与场景，仅凭文字就能完成一段有表演感的合成。",
-      tags: ["文字指令", "无需参考音频", "masked_speaker"],
-      ref: "none",
+      desc: "用自然语言描述语气、节奏与场景。可以只用文字，也可以带一段参考音频——带了就克隆那个音色，再按指令表演。",
+      tags: ["文字指令", "参考音频可选", "speed / style 自由控制"],
+      ref: "optional",
       examples: {
         text: "夜深了，城市慢慢安静下来。希望这段声音，能陪你度过一个平静的夜晚。",
         instruction: "用温柔、贴近耳边的气声慢慢地说，像深夜电台，句子之间留出自然的停顿。"
@@ -253,7 +285,7 @@
     {
       id: "voice_design", index: "09", group: "创意与内置", name: "声音设计", en: "Voice Design",
       desc: "仅用文字描述创造全新的声音角色，无需任何参考音频。",
-      tags: ["无需参考音频", "文字造声", "masked_speaker"],
+      tags: ["无需参考音频", "文字造声", "全新音色"],
       ref: "none",
       examples: {
         text: "在这座城市醒来之前，让我们先听一段来自远方的故事。",
@@ -286,6 +318,7 @@
   window.MingData = {
     ICONS,
     LANGUAGE_LABELS,
+    TAG_HINTS,
     EMOTIONS,
     VOICE_GROUPS,
     TASKS,

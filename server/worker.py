@@ -25,13 +25,23 @@ from pathlib import Path
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from starlette.concurrency import run_in_threadpool
 from loguru import logger
+
+# The upstream contract already defines the canonical values and their aliases;
+# importing them keeps this file from drifting out of sync (task_protocol has no
+# torch dependency, so this stays cheap).
+from ming_tiny.task_protocol import (
+    DIALECT_ALIASES,
+    DIALECT_VALUES,
+    EMOTION_ALIASES,
+    EMOTION_VALUES,
+)
 
 # Model loading
 tts_model = None
@@ -63,8 +73,19 @@ TASK_ALIASES = {
 REFERENCE_ONLY_TASKS = {"basic", "emotion", "dialect"}
 REFERENCE_TEXT_TASKS = {"seed", "multilingual", "paralinguistic"}
 
-LANGUAGES = {
-    "chinese", "english", "japanese", "german", "spanish", "french", "korean",
+LANGUAGES = (
+    "Chinese", "English", "Japanese", "Korean", "German", "French", "Spanish",
+)
+# The official API accepts short codes as well as full names; keep accepting the
+# Chinese labels too so hand-written curl requests do not fail.
+LANGUAGE_ALIASES = {
+    "zh": "Chinese", "chinese": "Chinese", "中文": "Chinese",
+    "en": "English", "english": "English", "英语": "English",
+    "ja": "Japanese", "jp": "Japanese", "japanese": "Japanese", "日语": "Japanese",
+    "ko": "Korean", "korean": "Korean", "韩语": "Korean",
+    "de": "German", "german": "German", "德语": "German",
+    "fr": "French", "french": "French", "法语": "French",
+    "es": "Spanish", "spanish": "Spanish", "西班牙语": "Spanish",
 }
 SPEEDS = {"慢速", "中速", "快速"}
 PITCH_VOLUMES = {"低", "中", "高"}
@@ -92,12 +113,43 @@ def _resolve_language(value) -> str:
         raise HTTPException(
             status_code=400, detail="'target_language' is required for this task"
         )
-    if lang.lower() not in LANGUAGES:
+    canonical = LANGUAGE_ALIASES.get(lang.lower())
+    if canonical is None:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported 'target_language' {lang!r}; use one of {sorted(LANGUAGES)}",
+            detail=(
+                f"Unsupported 'target_language' {lang!r}; use one of "
+                f"{list(LANGUAGES)} (ISO codes ja/ko/de/fr/es are also accepted)"
+            ),
         )
-    return lang
+    return canonical
+
+
+def _resolve_dialect(value) -> str:
+    """Accept the official control values (`cantonese`, `chuanyu dialect`) and
+    the Chinese labels, then hand the canonical value to the model."""
+    raw = _as_text(value, 'dialect').strip() or "川渝话"
+    canonical = DIALECT_ALIASES.get(raw.lower(), raw)
+    if canonical not in DIALECT_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid dialect {raw!r}; use one of {sorted(DIALECT_VALUES)} "
+                "(cantonese / chuanyu dialect also accepted)"
+            ),
+        )
+    return canonical
+
+
+def _resolve_emotion(value) -> str:
+    raw = _as_text(value, 'emotion').strip() or "中性"
+    canonical = EMOTION_ALIASES.get(raw.lower(), raw)
+    if canonical not in EMOTION_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid emotion {raw!r}; use one of {sorted(EMOTION_VALUES)}",
+        )
+    return canonical
 
 
 def _resolve_choice(value, field_name: str, allowed: set, default: str) -> str:
@@ -254,6 +306,16 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Duration", "X-Sample-Rate", "X-Task"],
 )
+
+
+# A direct browser call from an HTTPS page to a worker on a LAN address needs
+# Chrome's Private Network Access opt-in, same as the gateway.
+@app.middleware("http")
+async def allow_private_network(request: Request, call_next):
+    response = await call_next(request)
+    if request.headers.get("access-control-request-private-network") == "true":
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 
 
 @app.get("/health")
@@ -507,28 +569,14 @@ async def generate(request: dict):
                 kwargs['prompt_wav'] = request.get('prompt_wav')
 
         elif request_task in ['emotion', 'emotion_cv3', 'emotion_cv3n']:
-            emotion = request.get('emotion', '中性')
-            valid_emotions = ['中性', '悲伤', '愤怒', '高兴', '惊讶', '恐惧', '厌恶']
-            if emotion not in valid_emotions:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid emotion. Valid: {valid_emotions}"
-                )
-            kwargs['emotion'] = emotion
+            kwargs['emotion'] = _resolve_emotion(request.get('emotion'))
 
             # Add prompt_wav only if provided (optional for emotion)
             if request.get('prompt_wav'):
                 kwargs['prompt_wav'] = request.get('prompt_wav')
 
         elif request_task == 'dialect':
-            dialect = request.get('dialect', '川渝话')
-            valid_dialects = ['川渝话', '广粤话']
-            if dialect not in valid_dialects:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid dialect. Valid: {valid_dialects}"
-                )
-            kwargs['dialect'] = dialect
+            kwargs['dialect'] = _resolve_dialect(request.get('dialect'))
 
             # Add prompt_wav only if provided (can work without reference too)
             if request.get('prompt_wav'):
@@ -542,6 +590,11 @@ async def generate(request: dict):
                     detail="'instruction' is required for freeform task"
                 )
             kwargs['instruction'] = instruction
+            # One optional reference: with it the model clones that voice and
+            # still follows the instruction (upstream switches conditioning to
+            # speaker_only); without it a voice is invented from the instruction.
+            if request.get('prompt_wav'):
+                kwargs['prompt_wav'] = request.get('prompt_wav')
 
         elif request_task in ['voice_design', 'style', 'voice']:
             style = _as_text(request.get('style'), 'style').strip()

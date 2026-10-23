@@ -323,6 +323,17 @@ app.add_middleware(
 )
 
 
+# Chrome's Private Network Access: a public HTTPS page (GitHub Pages) reaching a
+# gateway on a private IP is gated behind this opt-in. Registered after the CORS
+# middleware so it also covers the preflight response CORS writes itself.
+@app.middleware("http")
+async def allow_private_network(request: Request, call_next):
+    response = await call_next(request)
+    if request.headers.get("access-control-request-private-network") == "true":
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
+
 @app.get("/health")
 async def health():
     summary = POOL.summary()
