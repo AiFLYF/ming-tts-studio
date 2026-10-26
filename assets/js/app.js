@@ -15,6 +15,8 @@
   const SEED_LANGUAGES = ["Chinese", "English"];
   const EMOTIONS = DATA.EMOTIONS || [];
   const VOICE_GROUPS = DATA.VOICE_GROUPS || [];
+  const MIN_REFERENCE_SECONDS = 0.5;
+  const MAX_REFERENCE_SECONDS = 30;
 
   // Flattened, de-duplicated view of the official catalog. Entries are
   // [name, note, "情绪1,情绪2"]; an empty emotion list means the bare name is
@@ -84,6 +86,12 @@
     libraryQuery: "",
     libraryError: "",
     libraryLoading: false,
+    libraryPickTarget: null,
+    trimAudio: null,
+    trimPlayKey: "",
+    trimRaf: 0,
+    waveforms: new Map(),
+    waveformFailures: new Set(),
     modal: "",
     lastFocus: null,
     pendingDelete: null,
@@ -254,6 +262,46 @@
   function speakerReference(upload) {
     if (!upload) return "";
     return upload.url || upload.path || "";
+  }
+
+  function roundSeconds(value) {
+    return Math.round(Number(value || 0) * 10) / 10;
+  }
+
+  function trimBounds(upload) {
+    const duration = Math.max(0, Number(upload && upload.duration) || 0);
+    if (!duration) return { start: 0, end: 0, duration: 0 };
+    let start = Number(upload.start);
+    let end = Number(upload.end);
+    if (!Number.isFinite(start)) start = 0;
+    if (!Number.isFinite(end)) end = duration;
+    start = Math.min(Math.max(0, start), Math.max(0, duration - MIN_REFERENCE_SECONDS));
+    end = Math.min(Math.max(end, start + MIN_REFERENCE_SECONDS), duration, start + MAX_REFERENCE_SECONDS);
+    return { start: roundSeconds(start), end: roundSeconds(end), duration };
+  }
+
+  function withTrim(upload) {
+    const range = trimBounds(upload);
+    return Object.assign({}, upload, { start: range.start, end: range.end });
+  }
+
+  function addTrimRequestFields(request, uploads, isList) {
+    const ranges = uploads.map(trimBounds);
+    const trimmed = ranges.some(range => range.duration > 0
+      && (range.start > 0.05 || range.end < range.duration - 0.05));
+    if (!trimmed) return;
+    const starts = ranges.map(range => roundSeconds(range.start));
+    const ends = ranges.map(range => roundSeconds(range.end));
+    request.prompt_start = isList ? starts : starts[0];
+    request.prompt_end = isList ? ends : ends[0];
+  }
+
+  function trimUpload(scope, id) {
+    if (scope === "speaker") {
+      const speaker = state.podcast[Number(id)];
+      return speaker ? speaker.upload : null;
+    }
+    return state.refs[id] || null;
   }
 
   /** Status strings Ming's gateway actually reports. A bare {"status":"ok"} from
@@ -617,6 +665,49 @@
     `;
   }
 
+  function libraryPickMarkup(scope, id) {
+    const speaker = scope === "speaker" ? ` data-speaker-index="${escapeHtml(String(id))}"` : "";
+    return `<button class="text-btn library-pick-link" type="button" data-pick-library${speaker}>从音频库选择</button>`;
+  }
+
+  function trimControlsMarkup(upload, scope, id) {
+    const range = trimBounds(upload);
+    if (range.duration < MIN_REFERENCE_SECONDS) return "";
+    return `
+      <div class="trim-controls" data-trim-scope="${escapeHtml(scope)}" data-trim-id="${escapeHtml(String(id))}" data-trim-duration="${range.duration}">
+        <div class="trim-head">
+          <span class="trim-title">参考片段 <em class="trim-mode" data-trim-mode>整段</em></span>
+          <span class="trim-readout" data-trim-readout></span>
+        </div>
+        <div class="trim-wave" data-trim-wave role="group" aria-label="参考音频波形，拖动两端手柄选择要使用的片段">
+          <canvas class="trim-canvas" data-trim-canvas aria-hidden="true"></canvas>
+          <span class="trim-shade trim-shade-left" data-trim-shade-left></span>
+          <span class="trim-shade trim-shade-right" data-trim-shade-right></span>
+          <span class="trim-selection" data-trim-selection>
+            <span class="trim-handle" data-trim-handle="start" role="slider" tabindex="0" aria-label="片段起点" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></span>
+            <span class="trim-handle" data-trim-handle="end" role="slider" tabindex="0" aria-label="片段终点" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></span>
+          </span>
+          <span class="trim-playhead" data-trim-playhead hidden></span>
+          <span class="trim-loading" data-trim-loading>正在解析波形…</span>
+        </div>
+        <div class="trim-foot">
+          <button class="trim-play-btn" type="button" data-trim-preview aria-label="试听选中片段">
+            <span class="trim-play-icon">${UI.play}</span>
+            <span data-trim-play-label>试听选中片段</span>
+          </button>
+          <span class="trim-hint" data-trim-hint>拖动两端手柄选择 · 最长 30 秒</span>
+          <button class="text-btn trim-reset" type="button" data-trim-reset>重置</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function referenceAudioMarkup(upload, scope, id, label) {
+    return trimBounds(upload).duration >= MIN_REFERENCE_SECONDS
+      ? trimControlsMarkup(upload, scope, id)
+      : miniPlayerMarkup(mediaUrl(upload), upload.duration, label);
+  }
+
   function refCardMarkup(task, upload) {
     const name = upload.original_name || displayFileName(upload.filename);
     const meta = [formatSeconds(upload.duration), formatSize(upload.size_kb)].filter(Boolean).join(" · ");
@@ -635,7 +726,7 @@
             <button class="ref-remove" type="button" data-clear-ref aria-label="移除参考音频">${UI.close}</button>
           </div>
         </div>
-        ${miniPlayerMarkup(mediaUrl(upload), upload.duration, name)}
+        ${referenceAudioMarkup(upload, "ref", task.id, name)}
       </div>
     `;
   }
@@ -666,7 +757,7 @@
           <label>参考音频 ${requirementBadge(task, isDemo)}</label>
           <span class="field-note">${escapeHtml(note)}</span>
         </div>
-        ${upload ? refCardMarkup(task, upload) : uploadZoneMarkup(isDemo)}
+        ${upload ? refCardMarkup(task, upload) : uploadZoneMarkup(isDemo) + (isDemo ? "" : libraryPickMarkup("ref", task.id))}
         ${isDemo ? '<p class="field-help">演示模式可跳过上传，生成结果会使用仓库内置示例音频。</p>' : ""}
         ${optional && !upload && !isDemo ? '<p class="field-help">官方默认不推荐传参考音频。传了会克隆该音色（等价于纯音色条件），再由上面的指令控制表演；不传则音色由指令与文本决定。</p>' : ""}
       </div>
@@ -697,9 +788,14 @@
           <strong title="${escapeHtml(name)}">${escapeHtml(name)}</strong>
           <button class="text-btn" type="button" data-speaker-clear="${index}">移除</button>
         </div>
-        ${miniPlayerMarkup(mediaUrl(upload), upload.duration, `角色 ${index + 1} 的参考音频`)}
+        ${referenceAudioMarkup(upload, "speaker", index, `角色 ${index + 1} 的参考音频`)}
       </div>
-    ` : speakerUploadMarkup(index, isDemo);
+    ` : `
+      <div class="mini-upload-stack">
+        ${speakerUploadMarkup(index, isDemo)}
+        ${isDemo ? "" : libraryPickMarkup("speaker", index)}
+      </div>
+    `;
 
     return `
       <div class="speaker-card">
@@ -974,6 +1070,7 @@
   }
 
   function renderComposer() {
+    stopTrimPreview();
     const task = currentTask();
     const draft = getDraft(task);
     const isDemo = state.mode === "demo";
@@ -1059,6 +1156,410 @@
       const input = $("[data-speaker-input]", zone);
       bindDropZone(zone, input, file => uploadSpeaker(task, index, file, zone));
     });
+
+    $$("[data-pick-library]", dom.composerPanel).forEach(button => {
+      button.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (state.mode === "demo") {
+          showDemoUploadHint();
+          return;
+        }
+        const speakerIndex = button.dataset.speakerIndex;
+        openLibrary(speakerIndex !== undefined
+          ? { kind: "speaker", index: Number(speakerIndex) }
+          : { kind: "ref", taskId: task.id });
+      });
+    });
+
+    bindTrimControls();
+  }
+
+  const TRIM_WAVEFORM_BUCKETS = 900;
+  let trimWaveformContext = null;
+
+  function trimUploadFor(controls) {
+    return trimUpload(controls.dataset.trimScope, controls.dataset.trimId);
+  }
+
+  function trimKey(controls) {
+    return `${controls.dataset.trimScope}:${controls.dataset.trimId}`;
+  }
+
+  function bindTrimControls() {
+    $$(".trim-controls", dom.composerPanel).forEach(controls => {
+      const upload = trimUploadFor(controls);
+      if (!upload) return;
+      updateTrimUI(controls, upload);
+      bindTrimDrag(controls);
+      const preview = $("[data-trim-preview]", controls);
+      if (preview) preview.addEventListener("click", () => toggleTrimPreview(controls));
+      const reset = $("[data-trim-reset]", controls);
+      if (reset) reset.addEventListener("click", () => resetTrim(controls));
+      $$("[data-trim-handle]", controls).forEach(handle => {
+        handle.addEventListener("keydown", event => nudgeTrim(controls, handle, event));
+      });
+      loadTrimWaveform(controls, upload);
+    });
+  }
+
+  function updateTrimUI(controls, upload) {
+    const range = trimBounds(upload);
+    const total = range.duration || 1;
+    const left = (range.start / total) * 100;
+    const right = Math.max(0, 100 - (range.end / total) * 100);
+    const selection = $("[data-trim-selection]", controls);
+    if (selection) {
+      selection.style.left = `${left}%`;
+      selection.style.right = `${right}%`;
+    }
+    const shadeLeft = $("[data-trim-shade-left]", controls);
+    if (shadeLeft) shadeLeft.style.width = `${left}%`;
+    const shadeRight = $("[data-trim-shade-right]", controls);
+    if (shadeRight) shadeRight.style.width = `${right}%`;
+
+    const readout = $("[data-trim-readout]", controls);
+    if (readout) {
+      readout.textContent = `${range.start.toFixed(1)} – ${range.end.toFixed(1)} s · 已选 ${(range.end - range.start).toFixed(1)} s`;
+    }
+    const isFull = range.start <= 0.05 && range.end >= range.duration - 0.05;
+    const mode = $("[data-trim-mode]", controls);
+    if (mode) mode.textContent = isFull ? "整段" : "片段";
+    controls.classList.toggle("is-full", isFull);
+
+    const startHandle = $('[data-trim-handle="start"]', controls);
+    if (startHandle) {
+      startHandle.setAttribute("aria-valuemax", (range.end - MIN_REFERENCE_SECONDS).toFixed(1));
+      startHandle.setAttribute("aria-valuenow", range.start.toFixed(1));
+      startHandle.setAttribute("aria-valuetext", `${range.start.toFixed(1)} 秒`);
+    }
+    const endHandle = $('[data-trim-handle="end"]', controls);
+    if (endHandle) {
+      endHandle.setAttribute("aria-valuemin", (range.start + MIN_REFERENCE_SECONDS).toFixed(1));
+      endHandle.setAttribute("aria-valuemax", Math.min(range.duration, range.start + MAX_REFERENCE_SECONDS).toFixed(1));
+      endHandle.setAttribute("aria-valuenow", range.end.toFixed(1));
+      endHandle.setAttribute("aria-valuetext", `${range.end.toFixed(1)} 秒`);
+    }
+    if (state.trimPlayKey !== trimKey(controls)) {
+      const playhead = $("[data-trim-playhead]", controls);
+      if (playhead) playhead.hidden = true;
+    }
+    paintTrimWaveform(controls, upload);
+  }
+
+  function setTrim(controls, start, end) {
+    const upload = trimUploadFor(controls);
+    if (!upload) return;
+    const duration = trimBounds(upload).duration;
+    let nextStart = Number.isFinite(start) ? start : 0;
+    let nextEnd = Number.isFinite(end) ? end : duration;
+    nextStart = Math.min(Math.max(0, nextStart), Math.max(0, duration - MIN_REFERENCE_SECONDS));
+    nextEnd = Math.min(Math.max(nextEnd, nextStart + MIN_REFERENCE_SECONDS), duration);
+    nextEnd = Math.min(nextEnd, nextStart + MAX_REFERENCE_SECONDS);
+    upload.start = roundSeconds(nextStart);
+    upload.end = roundSeconds(nextEnd);
+    if (state.trimPlayKey === trimKey(controls)) stopTrimPreview();
+    updateTrimUI(controls, upload);
+  }
+
+  function resetTrim(controls) {
+    const upload = trimUploadFor(controls);
+    if (!upload) return;
+    const range = trimBounds(upload);
+    setTrim(controls, 0, Math.min(range.duration, MAX_REFERENCE_SECONDS));
+  }
+
+  function nudgeTrim(controls, handle, event) {
+    const direction = event.key === "ArrowLeft" || event.key === "ArrowDown" ? -1
+      : (event.key === "ArrowRight" || event.key === "ArrowUp" ? 1 : 0);
+    if (!direction) return;
+    event.preventDefault();
+    const upload = trimUploadFor(controls);
+    if (!upload) return;
+    const range = trimBounds(upload);
+    const step = (event.shiftKey ? 1 : 0.1) * direction;
+    if (handle.dataset.trimHandle === "start") setTrim(controls, range.start + step, range.end);
+    else setTrim(controls, range.start, range.end + step);
+  }
+
+  function bindTrimDrag(controls) {
+    const wave = $("[data-trim-wave]", controls);
+    if (!wave) return;
+    let drag = null;
+
+    const timeAt = event => {
+      const upload = trimUploadFor(controls);
+      const range = upload ? trimBounds(upload) : { duration: 0 };
+      const rect = wave.getBoundingClientRect();
+      if (!rect.width || !range.duration) return 0;
+      const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+      return ratio * range.duration;
+    };
+
+    wave.addEventListener("pointerdown", event => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      const upload = trimUploadFor(controls);
+      if (!upload) return;
+      const range = trimBounds(upload);
+      if (!range.duration) return;
+      const rect = wave.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const startX = (range.start / range.duration) * rect.width;
+      const endX = (range.end / range.duration) * rect.width;
+      const handle = event.target.closest("[data-trim-handle]");
+      let mode = handle ? handle.dataset.trimHandle : "";
+      if (!mode) {
+        if (Math.abs(x - startX) <= 12) mode = "start";
+        else if (Math.abs(x - endX) <= 12) mode = "end";
+        else if (x > startX && x < endX) mode = "move";
+        else mode = x < startX ? "start" : "end";
+      }
+      drag = {
+        pointerId: event.pointerId,
+        mode,
+        offset: timeAt(event) - range.start,
+        start: range.start,
+        end: range.end,
+        span: range.end - range.start,
+        duration: range.duration
+      };
+      wave.setPointerCapture(event.pointerId);
+      wave.classList.add("is-dragging");
+      event.preventDefault();
+    });
+
+    wave.addEventListener("pointermove", event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const time = timeAt(event);
+      if (drag.mode === "start") {
+        let start = Math.min(time, drag.end - MIN_REFERENCE_SECONDS);
+        start = Math.max(start, drag.end - MAX_REFERENCE_SECONDS, 0);
+        setTrim(controls, start, drag.end);
+      } else if (drag.mode === "end") {
+        let end = Math.max(time, drag.start + MIN_REFERENCE_SECONDS);
+        end = Math.min(end, drag.start + MAX_REFERENCE_SECONDS, drag.duration);
+        setTrim(controls, drag.start, end);
+      } else {
+        const start = Math.min(Math.max(0, time - drag.offset), Math.max(0, drag.duration - drag.span));
+        setTrim(controls, start, start + drag.span);
+      }
+      event.preventDefault();
+    });
+
+    const finish = event => {
+      if (!drag || (event && event.pointerId !== drag.pointerId)) return;
+      const pointerId = drag.pointerId;
+      drag = null;
+      wave.classList.remove("is-dragging");
+      if (wave.hasPointerCapture && wave.hasPointerCapture(pointerId)) wave.releasePointerCapture(pointerId);
+    };
+    wave.addEventListener("pointerup", finish);
+    wave.addEventListener("pointercancel", finish);
+  }
+
+  function extractTrimPeaks(buffer) {
+    const buckets = TRIM_WAVEFORM_BUCKETS;
+    const channel = buffer.getChannelData(0);
+    const step = Math.max(1, Math.floor(channel.length / buckets));
+    const peaks = new Float32Array(buckets);
+    let loudest = 0;
+    for (let bucket = 0; bucket < buckets; bucket += 1) {
+      const start = bucket * step;
+      const end = Math.min(channel.length, start + step);
+      let peak = 0;
+      for (let index = start; index < end; index += 1) {
+        const value = Math.abs(channel[index]);
+        if (value > peak) peak = value;
+      }
+      peaks[bucket] = peak;
+      if (peak > loudest) loudest = peak;
+    }
+    if (loudest > 0) {
+      for (let index = 0; index < buckets; index += 1) peaks[index] /= loudest;
+    }
+    return peaks;
+  }
+
+  function decodeTrimWaveform(url) {
+    return fetch(url, { credentials: "same-origin" })
+      .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.arrayBuffer();
+      })
+      .then(bytes => {
+        if (!trimWaveformContext) {
+          const Context = window.AudioContext || window.webkitAudioContext;
+          if (!Context) throw new Error("AudioContext unavailable");
+          trimWaveformContext = new Context();
+        }
+        return trimWaveformContext.decodeAudioData(bytes);
+      })
+      .then(buffer => ({ duration: buffer.duration, peaks: extractTrimPeaks(buffer) }));
+  }
+
+  function paintTrimWaveform(controls, upload) {
+    const wave = $("[data-trim-wave]", controls);
+    const canvas = $("[data-trim-canvas]", controls);
+    if (!wave || !canvas) return;
+    const width = Math.max(1, Math.round(wave.clientWidth));
+    const height = Math.max(1, Math.round(wave.clientHeight));
+    const ratio = Math.min(2, window.devicePixelRatio || 1);
+    const pixelWidth = Math.round(width * ratio);
+    const pixelHeight = Math.round(height * ratio);
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+
+    const entry = state.waveforms.get(mediaUrl(upload));
+    const peaks = entry && entry.peaks;
+    const range = trimBounds(upload);
+    const total = range.duration || 1;
+    const middle = height / 2;
+    const barWidth = 2;
+    const barGap = 1;
+    const bars = Math.max(1, Math.floor(width / (barWidth + barGap)));
+    const selectedFrom = (range.start / total) * width;
+    const selectedTo = (range.end / total) * width;
+
+    for (let index = 0; index < bars; index += 1) {
+      const x = index * (barWidth + barGap);
+      let level = 0;
+      if (peaks && peaks.length) {
+        const bucket = Math.min(peaks.length - 1, Math.floor((index / bars) * peaks.length));
+        level = peaks[bucket];
+      }
+      const center = x + barWidth / 2;
+      const selected = center >= selectedFrom && center <= selectedTo;
+      const amplitude = Math.max(1, Math.max(0.05, level) * (middle - 3));
+      context.fillStyle = selected ? "rgba(214, 243, 106, 0.92)" : "rgba(232, 242, 226, 0.2)";
+      context.fillRect(x, middle - amplitude, barWidth, amplitude * 2);
+    }
+    if (!peaks) {
+      context.fillStyle = "rgba(232, 242, 226, 0.12)";
+      context.fillRect(0, middle, width, 1);
+    }
+  }
+
+  function loadTrimWaveform(controls, upload) {
+    const url = mediaUrl(upload);
+    if (!url) return;
+    const loading = $("[data-trim-loading]", controls);
+    const cached = state.waveforms.get(url);
+    if (cached) {
+      if (loading) loading.hidden = true;
+      paintTrimWaveform(controls, upload);
+      return;
+    }
+    if (state.waveformFailures.has(url)) {
+      if (loading) loading.hidden = true;
+      return;
+    }
+    if (loading) loading.hidden = false;
+    decodeTrimWaveform(url).then(entry => {
+      state.waveforms.set(url, entry);
+      if (!controls.isConnected) return;
+      if (loading) loading.hidden = true;
+      paintTrimWaveform(controls, upload);
+    }).catch(() => {
+      state.waveformFailures.add(url);
+      if (!controls.isConnected) return;
+      if (loading) loading.hidden = true;
+      const hint = $("[data-trim-hint]", controls);
+      if (hint) hint.textContent = "波形不可用，仍可拖动选择";
+    });
+  }
+
+  function ensureTrimAudio() {
+    if (!state.trimAudio) {
+      state.trimAudio = new Audio();
+      state.trimAudio.preload = "auto";
+      state.trimAudio.addEventListener("ended", resetTrimPlaybackUI);
+      state.trimAudio.addEventListener("error", resetTrimPlaybackUI);
+    }
+    return state.trimAudio;
+  }
+
+  function resetTrimPlaybackUI() {
+    state.trimPlayKey = "";
+    if (state.trimRaf) {
+      window.cancelAnimationFrame(state.trimRaf);
+      state.trimRaf = 0;
+    }
+    $$(".trim-controls", dom.composerPanel).forEach(controls => {
+      controls.classList.remove("is-playing");
+      const label = $("[data-trim-play-label]", controls);
+      if (label) label.textContent = "试听选中片段";
+      const playhead = $("[data-trim-playhead]", controls);
+      if (playhead) playhead.hidden = true;
+    });
+  }
+
+  function stopTrimPreview() {
+    if (state.trimAudio && !state.trimAudio.paused) state.trimAudio.pause();
+    resetTrimPlaybackUI();
+  }
+
+  function toggleTrimPreview(controls) {
+    const upload = trimUploadFor(controls);
+    if (!upload) return;
+    const key = trimKey(controls);
+    const audio = ensureTrimAudio();
+    if (state.trimPlayKey === key && !audio.paused) {
+      stopTrimPreview();
+      return;
+    }
+    pauseMiniAudio();
+    pauseResultAudio();
+    stopTrimPreview();
+
+    const range = trimBounds(upload);
+    state.trimPlayKey = key;
+    controls.classList.add("is-playing");
+    $$("[data-trim-play-label]", dom.composerPanel).forEach(label => {
+      label.textContent = label.closest(".trim-controls") === controls ? "停止试听" : "试听选中片段";
+    });
+
+    const drawPlayhead = time => {
+      const playhead = $("[data-trim-playhead]", controls);
+      if (!playhead) return;
+      playhead.hidden = false;
+      playhead.style.left = `${Math.min(100, Math.max(0, (time / (range.duration || 1)) * 100))}%`;
+    };
+    const tick = () => {
+      if (state.trimPlayKey !== key) return;
+      const live = trimBounds(upload);
+      drawPlayhead(Math.min(audio.currentTime, live.end));
+      if (audio.currentTime >= live.end - 0.015) {
+        stopTrimPreview();
+        return;
+      }
+      state.trimRaf = window.requestAnimationFrame(tick);
+    };
+    // requestAnimationFrame is throttled in background tabs; timeupdate keeps
+    // the hard stop at the selection end even when the playhead cannot redraw.
+    audio.ontimeupdate = () => {
+      if (state.trimPlayKey !== key) return;
+      if (audio.currentTime >= trimBounds(upload).end - 0.015) stopTrimPreview();
+    };
+
+    audio.pause();
+    audio.src = mediaUrl(upload);
+    audio.load();
+    audio.addEventListener("loadedmetadata", () => {
+      if (state.trimPlayKey !== key) return;
+      try {
+        audio.currentTime = range.start;
+      } catch (error) {
+        // Some browsers reject seeks before the first decoded frame; the
+        // next metadata event will retry the same start position.
+      }
+      drawPlayhead(range.start);
+      attemptPlay(audio, false);
+      tick();
+    }, { once: true });
   }
 
   function bindDropZone(zone, input, onFile) {
@@ -1148,6 +1649,21 @@
     }
   }
 
+  /** Reject clips the model cannot use. Duration is only known after the
+   *  upload, and a 0.3 s reference produces garbage instead of an error. */
+  function usableReference(payload) {
+    const duration = Number(payload && payload.duration) || 0;
+    if (duration > 0 && duration < MIN_REFERENCE_SECONDS) {
+      toast(
+        `参考音频太短（${duration.toFixed(2)} 秒），至少需要 ${MIN_REFERENCE_SECONDS} 秒。`,
+        "error",
+        5600
+      );
+      return false;
+    }
+    return true;
+  }
+
   async function uploadReference(task, file, zone) {
     const problem = validateAudioFile(file);
     if (problem) {
@@ -1157,7 +1673,11 @@
     markZoneBusy(zone, true);
     try {
       const payload = await client.upload(file);
-      state.refs[task.id] = payload;
+      if (!usableReference(payload)) {
+        markZoneBusy(zone, false);
+        return;
+      }
+      state.refs[task.id] = withTrim(payload);
       if (state.taskId === task.id) renderComposer();
       refreshLibraryCount();
       if (state.modal === "library") refreshLibrary();
@@ -1180,7 +1700,11 @@
     markZoneBusy(zone, true);
     try {
       const payload = await client.upload(file);
-      speaker.upload = payload;
+      if (!usableReference(payload)) {
+        markZoneBusy(zone, false);
+        return;
+      }
+      speaker.upload = withTrim(payload);
       if (state.taskId === task.id) renderComposer();
       refreshLibraryCount();
       if (state.modal === "library") refreshLibrary();
@@ -1403,6 +1927,7 @@
 
       request.prompt_wav = promptWavs;
       request.prompt_text = promptTexts;
+      addTrimRequestFields(request, state.podcast.map(speaker => speaker.upload), true);
       return request;
     }
 
@@ -1414,6 +1939,7 @@
       // instruction. Omitted, the voice comes from the instruction alone.
       if (!demo && state.refs[task.id]) {
         request.prompt_wav = speakerReference(state.refs[task.id]);
+        addTrimRequestFields(request, [state.refs[task.id]], false);
       }
       return request;
     }
@@ -1421,6 +1947,7 @@
     if (task.ref === "required" && !demo) {
       if (!state.refs[task.id]) throw new Error("请先上传参考音频。");
       request.prompt_wav = speakerReference(state.refs[task.id]);
+      addTrimRequestFields(request, [state.refs[task.id]], false);
     }
 
     if (task.promptText && !demo) {
@@ -2259,7 +2786,10 @@
           <div class="lib-meta">${escapeHtml(meta)}</div>
           ${miniPlayerMarkup(client.url(file.url), file.duration, name)}
         </div>
-        <button class="btn small danger-ghost" type="button" data-delete-url="${escapeHtml(file.url)}" data-delete-file="${escapeHtml(file.filename)}">删除</button>
+        <div class="lib-actions">
+          ${state.libraryPickTarget ? `<button class="btn small lime" type="button" data-use-file="${escapeHtml(file.filename)}">复用</button>` : ""}
+          <button class="btn small danger-ghost" type="button" data-delete-url="${escapeHtml(file.url)}" data-delete-file="${escapeHtml(file.filename)}">删除</button>
+        </div>
       </div>
     `;
   }
@@ -2335,11 +2865,24 @@
     }
   }
 
-  function openLibrary() {
+  function openLibrary(target = null) {
+    state.libraryPickTarget = target;
+    updateLibraryPickHeader();
     openModal("library", () => {
       updateLibraryDemoState();
       refreshLibrary();
     });
+  }
+
+  function updateLibraryPickHeader() {
+    const title = $("#libraryTitle");
+    const description = $(".library-dialog .dialog-head p");
+    if (title) title.textContent = state.libraryPickTarget ? "选择参考音频" : "音频库";
+    if (description) {
+      description.textContent = state.libraryPickTarget
+        ? "点选文件右侧的「复用」填入当前参考音频；也可以继续上传新文件。"
+        : "参考音频保存在服务端，可随时试听、复用或删除。";
+    }
   }
 
   function updateLibraryDemoState() {
@@ -2473,10 +3016,38 @@
   }
 
   function handleLibraryClick(event) {
+    const useButton = event.target.closest("[data-use-file]");
+    if (useButton) {
+      useLibraryFile(useButton.dataset.useFile);
+      return;
+    }
     const button = event.target.closest("[data-delete-url]");
     if (!button) return;
     if (button.dataset.armed === "1") deleteLibraryFile(button);
     else armDelete(button);
+  }
+
+  function useLibraryFile(filename) {
+    const target = state.libraryPickTarget;
+    if (!target) return;
+    const file = state.libraryFiles.find(item => item.filename === filename);
+    if (!file) {
+      toast("该音频已不存在，请刷新音频库。", "error");
+      return;
+    }
+    const upload = withTrim(Object.assign({}, file));
+    let label = "参考音频";
+    if (target.kind === "speaker") {
+      const speaker = state.podcast[target.index];
+      if (!speaker) return;
+      speaker.upload = upload;
+      label = `角色 ${target.index + 1}`;
+    } else {
+      state.refs[target.taskId] = upload;
+    }
+    closeModal("library");
+    renderComposer();
+    toast(`${label}已复用「${displayFileName(file.filename)}」，请确认参考文本与音频一致。`, "success", 5200);
   }
 
   function clearRefsForUrl(url) {
@@ -2881,6 +3452,8 @@
     if (modalName === "library") {
       stopMiniAudio();
       state.libraryQuery = "";
+      state.libraryPickTarget = null;
+      updateLibraryPickHeader();
       if (dom.librarySearch) dom.librarySearch.value = "";
     }
     state.modal = "";
@@ -2946,7 +3519,7 @@
     dom.sidebarSettingsBtn.addEventListener("click", openSettings);
     dom.statusPill.addEventListener("click", openSettings);
     dom.settingsBtn.addEventListener("click", openSettings);
-    dom.libraryBtn.addEventListener("click", openLibrary);
+    dom.libraryBtn.addEventListener("click", () => openLibrary());
     dom.demoSettingsBtn.addEventListener("click", openSettings);
     dom.demoRetryBtn.addEventListener("click", retryConnection);
     dom.docsLink.addEventListener("click", event => {
@@ -3059,6 +3632,10 @@
       state.resizeFrame = window.requestAnimationFrame(() => {
         state.resizeFrame = 0;
         updateResultProgress();
+        $$(".trim-controls", dom.composerPanel).forEach(controls => {
+          const upload = trimUploadFor(controls);
+          if (upload) paintTrimWaveform(controls, upload);
+        });
       });
     });
 

@@ -15,6 +15,7 @@ Ming-3.0-tts-tiny Full Feature API
 """
 
 import asyncio
+import math
 import os
 import io
 import re
@@ -53,6 +54,8 @@ TEMP_DIR = Path(tempfile.gettempdir())
 
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac"}
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MIN_REFERENCE_SECONDS = 0.5
+MAX_REFERENCE_SECONDS = 30.0
 
 TASK_ALIASES = {
     "tts": "seed",
@@ -417,6 +420,138 @@ def _resolve_reference_path(value: str) -> str:
     return str(candidate) if candidate.is_file() else ""
 
 
+def _trim_seconds(value, field_name: str):
+    """Parse an optional client-supplied timestamp in seconds."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        raise HTTPException(status_code=400, detail=f"'{field_name}' must be a number")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=400, detail=f"'{field_name}' must be a number") from error
+    if not math.isfinite(number):
+        raise HTTPException(status_code=400, detail=f"'{field_name}' must be a finite number")
+    return number
+
+
+def _expand_trim_values(value, count: int, field_name: str) -> list:
+    """Allow one scalar for every reference or a per-reference list."""
+    if value is None:
+        return [None] * count
+    if isinstance(value, (list, tuple)):
+        if len(value) != count:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{field_name}' must contain {count} value(s) to match prompt_wav",
+            )
+        return list(value)
+    return [value] * count
+
+
+def _trim_reference_audio(path: Path, start: float, end: float) -> Path:
+    """Cut [start, end) into a temporary wav the model can read."""
+    try:
+        import soundfile as sf
+
+        info = sf.info(str(path))
+        start_frame = max(0, int(round(start * info.samplerate)))
+        end_frame = min(info.frames, int(round(end * info.samplerate)))
+        if end_frame <= start_frame:
+            raise ValueError("empty selection")
+        samples, sample_rate = sf.read(
+            str(path), start=start_frame, stop=end_frame, dtype="float32", always_2d=True
+        )
+        target = TEMP_DIR / f"ming_ref_{uuid.uuid4().hex}.wav"
+        sf.write(str(target), samples, sample_rate, subtype="PCM_16")
+        return target
+    except HTTPException:
+        raise
+    except Exception as error:  # noqa: BLE001 - reported as a client error below
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unable to trim reference audio: {Path(path).name}",
+        ) from error
+
+
+def _apply_reference_trims(request: dict) -> list[Path]:
+    """Rewrite request['prompt_wav'] to trimmed temp files when a range is set.
+
+    Both endpoints are optional and may be scalar (applied to every reference)
+    or a list matching prompt_wav. Returns temp files for the caller to remove.
+    """
+    references = request.get("prompt_wav")
+    if not references:
+        return []
+    is_list = isinstance(references, list)
+    paths = references if is_list else [references]
+    starts = _expand_trim_values(request.get("prompt_start"), len(paths), "prompt_start")
+    ends = _expand_trim_values(request.get("prompt_end"), len(paths), "prompt_end")
+
+    # Validate every range before cutting anything, so a bad second entry does
+    # not leave the first excerpt behind as an orphan temp file.
+    plans = []
+    for index, path in enumerate(paths):
+        start = _trim_seconds(starts[index], "prompt_start")
+        end = _trim_seconds(ends[index], "prompt_end")
+        if start is None and end is None:
+            plans.append((path, None, None))
+            continue
+
+        info = _probe_audio(Path(path))
+        duration = float(info.get("duration") or 0)
+        if duration <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unable to read reference duration: {Path(path).name}",
+            )
+        start = 0.0 if start is None else start
+        end = duration if end is None else end
+        if start < 0:
+            raise HTTPException(status_code=400, detail="'prompt_start' cannot be negative")
+        if end > duration + 0.05:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'prompt_end' ({end:.2f}s) exceeds reference duration ({duration:.2f}s)",
+            )
+        length = end - start
+        if length < MIN_REFERENCE_SECONDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Reference clip must be at least {MIN_REFERENCE_SECONDS:g}s long",
+            )
+        if length > MAX_REFERENCE_SECONDS + 0.05:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Reference clip cannot exceed {MAX_REFERENCE_SECONDS:g}s",
+            )
+        plans.append((path, start, end))
+
+    result_paths = []
+    temp_paths = []
+    try:
+        for path, start, end in plans:
+            if start is None:
+                result_paths.append(path)
+                continue
+            trimmed = _trim_reference_audio(Path(path), start, end)
+            temp_paths.append(trimmed)
+            result_paths.append(str(trimmed))
+    except BaseException:
+        # A failure on the second reference must not leave the first excerpt
+        # behind: the caller only cleans up what it is told about.
+        for temp in temp_paths:
+            try:
+                temp.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+
+    if temp_paths:
+        request["prompt_wav"] = result_paths if is_list else result_paths[0]
+    return temp_paths
+
+
 @app.post("/generate")
 async def generate(request: dict):
     """
@@ -636,7 +771,13 @@ async def generate(request: dict):
                         status_code=400,
                         detail=f"Reference audio not found on server: {reference!r}",
                     )
-        
+
+        # All inputs are validated; only now cut excerpts so a rejected request
+        # never leaves temporary files behind.
+        trimmed_reference_paths = _apply_reference_trims(request)
+        if trimmed_reference_paths:
+            kwargs['prompt_wav'] = request['prompt_wav']
+
         # Generate speech. The model call is blocking CPU/GPU work, so it runs in
         # a worker thread: doing it inline would freeze the event loop, and the
         # gateway's readiness probe (/health, 3s timeout) would then mark a busy
@@ -662,6 +803,11 @@ async def generate(request: dict):
         finally:
             if os.path.exists(output_path):
                 os.remove(output_path)
+            for trimmed_path in trimmed_reference_paths:
+                try:
+                    trimmed_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning(f"Unable to remove trimmed reference: {trimmed_path}")
 
         return StreamingResponse(
             io.BytesIO(audio_data),

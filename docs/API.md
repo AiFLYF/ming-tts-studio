@@ -186,6 +186,31 @@ curl -X POST http://127.0.0.1:8081/generate \
 
 区分大小写、必须带方括号，可以直接写在句子任意位置。
 
+#### 参考音频片段（`prompt_start` / `prompt_end`）
+
+默认使用整段参考音频；传入起点和终点（秒，浮点数）即可只取其中一段，适合从长录音里挑出干净人声。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `prompt_start` | number 或 number[] | 片段起点，≥ 0，缺省为 0 |
+| `prompt_end` | number 或 number[] | 片段终点，≤ 音频时长，缺省为整段 |
+
+- 片段长度必须在 0.5–30 秒之间，建议 3–15 秒；越界返回 400。
+- `podcast` 可传与 `prompt_wav` 等长的数组，顺序对应；也可以传标量，作用于每一位说话人。
+- 服务端从上传目录读取原文件，裁剪结果写入临时文件，生成结束后自动删除，不会改动原音频。
+
+```json
+{
+  "task": "seed",
+  "text": "只使用参考音频的第 2.0 到 8.0 秒。",
+  "prompt_wav": "/uploads/a1b2c3d4e5_reference.wav",
+  "prompt_text": "参考音频里实际说出的文本",
+  "target_language": "Chinese",
+  "prompt_start": 2.0,
+  "prompt_end": 8.0
+}
+```
+
 #### 播客脚本
 
 ```json

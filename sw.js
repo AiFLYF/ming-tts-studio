@@ -7,7 +7,7 @@
  * Bump VERSION together with assets/js/config.js and the ?v= strings in
  * index.html — old caches are dropped on activate.
  */
-const VERSION = "1.0.6";
+const VERSION = "1.0.7";
 const CACHE = `ming-tts-studio-${VERSION}`;
 const CACHE_PREFIX = "ming-tts-studio-";
 const INDEX_URL = new URL("./index.html", self.location.href).href;
