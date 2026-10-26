@@ -177,6 +177,27 @@
     }
 
     async readError(response) {
+      if (response.status === 401) {
+        // Expired password session: send the tab back to the login page when
+        // the gateway is same-origin. A cross-origin page (GitHub Pages talking
+        // to someone's LAN gateway) can never share that cookie, so pointing it
+        // at /login would be a dead end — tell it where the login page lives.
+        let sameOrigin = false;
+        let origin = "";
+        try {
+          const base = new URL(this.baseUrl, window.location.href);
+          origin = base.origin;
+          sameOrigin = origin === window.location.origin;
+        } catch (error) {
+          sameOrigin = false;
+        }
+        if (sameOrigin) {
+          const next = window.location.pathname + window.location.search;
+          window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+          return "需要密码访问，请重新登录。";
+        }
+        return `该网关已开启访问密码，而这个页面与网关不同源，拿不到登录状态。请改用网关自带的页面 ${origin}/studio/ 登录后再使用。`;
+      }
       let payload = null;
       try {
         const text = await response.text();

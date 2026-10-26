@@ -3,7 +3,7 @@
 这套接口由 `server/gateway.py` 与 `server/worker.py` 实现，也是前端唯一依赖的契约。任何实现了这些端点的服务都能被界面直接接管——换成你自己的推理后端，只要接口对得上。
 
 - **网关**：`http://<host>:8081`，面向浏览器，做调度与同源托管
-- **worker**：`http://<host>:8091` 起，每张卡一个，直接吃 JSON 出 WAV
+- **worker**：`:8091` 起，每张卡一个，直接吃 JSON 出 WAV。由 `./start.sh` 拉起时固定绑 `127.0.0.1`（只给网关用，不对外），手动跑 `worker.py` 才会用 `HOST` 环境变量（默认 `0.0.0.0`）
 - 两者接口基本一致；差异只在 §2.1 的 `/health` 与 §2.2 的 `/cluster/status`
 
 > 没有鉴权。网关默认监听 `0.0.0.0`，公网暴露前请套反向代理并加认证，见 [README · 安全与网络暴露](../README.md#安全与网络暴露)。
@@ -15,7 +15,7 @@
 | 项目 | 取值 |
 | --- | --- |
 | 编码 | UTF-8，请求体 `Content-Type: application/json`（上传为 `multipart/form-data`） |
-| 鉴权 | 无 |
+| 鉴权 | 默认无；设置 `STUDIO_PASSWORD` 后需登录 Cookie 或 HTTP Basic（用户名任意） |
 | CORS | `Access-Control-Allow-Origin: *`，暴露 `X-Duration`、`X-Sample-Rate`、`X-Task` |
 | Private Network Access | 预检请求带 `Access-Control-Request-Private-Network: true` 时回 `Access-Control-Allow-Private-Network: true` |
 | 请求体上限 | 网关 55 MB，`/upload` 单文件 50 MB |
@@ -32,12 +32,23 @@
 
 局域网 IP 还受 Chrome Private Network Access 约束，服务端不回 `Access-Control-Allow-Private-Network` 就仍会被拦——本项目已处理。
 
+### 访问密码
+
+在 `.env` 中设置 `STUDIO_PASSWORD` 并重启网关后，密码保护才会启用；留空则保持完全开放。
+
+- **浏览器**：访问受保护页面会 307 到 `/login?next=...`，输入密码后写入 HttpOnly 会话 Cookie（默认 24 小时）；`GET /logout` 退出。
+- **脚本**：使用 HTTP Basic，密码正确即可，用户名任意：`curl -u studio:你的密码 http://127.0.0.1:8081/cluster/status`。
+- **未认证响应**：页面导航返回 307 登录页，API 请求返回 `401 {"detail": "需要密码访问，请先登录 / password required"}`。
+- **公开端点**：只有 `/health`、`/login`、`/logout`、`/favicon.ico` 不要求密码；`/studio/*`、`/uploads/*`、`/generate`、`/docs` 等其余路径全部受保护（OPTIONS 预检也放行）。
+- **跨域页面拿到 401**：登录态是 HttpOnly Cookie，GitHub Pages 这类跨域前端无法共享。开启密码后请改用网关自带的 `http://<网关IP>:8081/studio/`，或用 Basic 头直接调 API。
+
 ### 状态码
 
 | 码 | 含义 |
 | --- | --- |
 | 200 | 成功 |
 | 400 | 参数不合法（字段缺失、取值不在白名单、参考音频路径不在 `uploads/` 内） |
+| 401 | 已开启访问密码但请求未认证 |
 | 404 | 文件或路由不存在 |
 | 413 | 请求体/文件过大 |
 | 429 / 503 | 没有可用 worker，或模型仍在加载 |

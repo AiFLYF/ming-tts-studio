@@ -23,9 +23,39 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
+
+try:
+    from auth import (
+        AUTH_ENABLED,
+        COOKIE_NAME,
+        PasswordGate,
+        check_password,
+        login_page_html,
+        request_is_authenticated,
+        safe_next,
+        set_session_cookie,
+    )
+except ImportError:  # imported as `server.gateway` instead of a script
+    from server.auth import (
+        AUTH_ENABLED,
+        COOKIE_NAME,
+        PasswordGate,
+        check_password,
+        login_page_html,
+        request_is_authenticated,
+        safe_next,
+        set_session_cookie,
+    )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STUDIO_DIR = Path(os.environ.get("STUDIO_DIR", BASE_DIR)).resolve()
@@ -55,6 +85,9 @@ DROP_REQUEST_HEADERS = HOP_BY_HOP | {
     "host",
     "content-length",
     "accept-encoding",
+    # Gateway-only credentials must never reach (or be logged by) a worker.
+    "authorization",
+    "cookie",
     # Set by the gateway itself; never trust a client-supplied value.
     "x-forwarded-for",
     "x-forwarded-host",
@@ -310,6 +343,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Optional password gate (active only when STUDIO_PASSWORD is set). Registered
+# before CORS so CORS stays outermost and even 401/login redirects keep their
+# cross-origin headers.
+app.add_middleware(PasswordGate)
+
 # The studio can be hosted on GitHub Pages or any other static origin, so the
 # public gateway must answer CORS preflights itself and expose the audio metadata
 # response headers to browser JavaScript.
@@ -355,6 +393,61 @@ async def health():
             "requests_in_flight": summary["requests_in_flight"],
         },
     )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """The login page is server-rendered and has no asset links, so browsers ask
+    for /favicon.ico. Answer it publicly instead of proxying a 404/401."""
+    icon = STUDIO_DIR / "assets" / "img" / "favicon.svg"
+    if icon.is_file():
+        return FileResponse(
+            icon,
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    return Response(status_code=204)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_form(request: Request, next: str = "/studio/"):
+    target = safe_next(next)
+    if not AUTH_ENABLED or request_is_authenticated(request):
+        return RedirectResponse(target, status_code=303)
+    return HTMLResponse(
+        login_page_html(target),
+        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"},
+    )
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    if not AUTH_ENABLED:
+        return RedirectResponse("/studio/", status_code=303)
+    form = await request.form()
+    target = safe_next(str(form.get("next") or "/studio/"))
+    if not check_password(str(form.get("password") or "")):
+        # Slow down online guessing without locking out legitimate users.
+        await asyncio.sleep(0.4)
+        return HTMLResponse(
+            login_page_html(target, "密码不正确，请重试。"),
+            status_code=401,
+            headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"},
+        )
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    secure = request.url.scheme == "https" or forwarded_proto == "https"
+    response = RedirectResponse(target, status_code=303)
+    set_session_cookie(response, secure)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.api_route("/logout", methods=["GET", "POST"])
+async def logout():
+    response = RedirectResponse("/login" if AUTH_ENABLED else "/studio/", status_code=303)
+    response.delete_cookie(COOKIE_NAME, path="/")
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/cluster/status")

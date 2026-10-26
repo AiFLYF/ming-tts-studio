@@ -227,9 +227,19 @@ app.add_middleware(
 - `/generate` 超时时间为 5 分钟，够单卡生成长文本；本后端**没有纯 CPU 路径**（启动器先查 `nvidia-smi`，worker 固定 `DEVICE=cuda:0`）。
 - 上传接口限制 50 MB，前端会先做格式与大小检查；网关侧请求体上限 55 MB，超限直接 413，不会先收完再判断。
 
+### 访问密码（可选）
+
+在 `.env` 里设置 `STUDIO_PASSWORD=你的密码`，重启服务（`./stop.sh && ./start.sh`）即可开启：
+
+- 浏览器访问 `/studio/` 会先进入登录页；通过后写入 HttpOnly 会话 Cookie，默认有效 24 小时（可用 `STUDIO_SESSION_HOURS` 调整）。
+- 保护范围包括页面、静态资源、`/generate`、上传与音频库等全部 API；`/health` 保持公开，方便探活和监控。
+- 脚本可用 HTTP Basic（用户名任意）：`curl -u studio:你的密码 http://127.0.0.1:8081/cluster/status`。访问 `/logout` 可退出登录。
+- `STUDIO_PASSWORD` 留空或不写时完全关闭，行为与之前一致。
+- 密码明文保存在 `.env`，HTTP 传输也不是加密的；公网部署请在前面套 HTTPS 反向代理。
+
 ### 安全与网络暴露
 
-`./start.sh` 启动的网关默认监听 `0.0.0.0:8081`，**没有身份认证、没有速率限制**——它面向的是「自己的机器 / 可信内网」。如果要放到公网：
+`./start.sh` 启动的网关默认监听 `0.0.0.0:8081`。内置密码门可以挡住未授权访问，但**没有速率限制**；如果要放到公网：
 
 - 最省事的做法是套一层带认证的反向代理（Nginx basic auth、Cloudflare Access、Authelia 都行），只把 `/studio/` 与 API 暴露出去；
 - 不要把仓库根目录整个交给静态服务器——`server/`、`uploads/`、`.env` 都不该被公网读到（Pages 工作流已经只发布前端文件）。
@@ -418,6 +428,8 @@ ming-tts-studio/
 ├── server/
 │   ├── launcher.py             # 一键启动：查 GPU、下权重、拉 worker、预热、起网关
 │   ├── gateway.py              # 网关：最少在途调度、CORS、/studio 同源托管、健康汇总
+│   ├── auth.py                 # 可选访问密码：登录页、HttpOnly 会话 Cookie、Basic
+
 │   ├── worker.py               # 单卡推理服务：10 个任务的参数校验与 /generate
 │   ├── download_model.py       # ModelScope / Hugging Face 下载与完整性检查
 │   ├── ming_tiny/              # 上游推理包（见 THIRD_PARTY_NOTICES.md）

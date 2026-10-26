@@ -234,6 +234,8 @@ MODEL_PATH=./models/Ming-3.0-tts-tiny
 GATEWAY_PORT=8081
 WORKER_BASE_PORT=8091
 MIN_FREE_VRAM_MB=19000
+# STUDIO_PASSWORD=           # 留空=不启用；填写后页面与 API 需要密码
+# STUDIO_SESSION_HOURS=24
 # GPUS=0,1
 # HF_ENDPOINT=https://hf-mirror.com
 # HF_TOKEN=hf_xxx
@@ -247,6 +249,8 @@ MIN_FREE_VRAM_MB=19000
 | `GATEWAY_PORT` | 对外端口 |
 | `WORKER_BASE_PORT` | 第一个 worker 端口，后续依次 +1 |
 | `MIN_FREE_VRAM_MB` | 启动前要求的最小空闲显存 |
+| `STUDIO_PASSWORD` | 访问密码；留空则关闭认证 |
+| `STUDIO_SESSION_HOURS` | 登录会话有效期，默认 24 小时 |
 | `HF_ENDPOINT` / `HF_TOKEN` | Hugging Face 镜像与令牌 |
 
 ## 常见问题

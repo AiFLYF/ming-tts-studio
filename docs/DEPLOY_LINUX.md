@@ -96,6 +96,8 @@ MODEL_PATH=./models/Ming-3.0-tts-tiny
 GATEWAY_PORT=8081
 # GPUS=0,1,2,3               # 留空使用全部 GPU
 MIN_FREE_VRAM_MB=19000
+# STUDIO_PASSWORD=           # 留空=不启用；填写后页面与 API 需要密码
+# STUDIO_SESSION_HOURS=24
 ```
 
 各来源的行为：

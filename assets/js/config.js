@@ -25,7 +25,7 @@ window.MING_CONFIG = {
   apiBase: "",
   demoAudio: "assets/audio/demo-zh.wav",
   healthIntervalMs: 20000,
-  version: "1.0.7",
+  version: "1.0.8",
   serviceWorker: true,
   apiDocs: "https://github.com/AiFLYF/ming-tts-studio/blob/main/docs/API.md"
 };
